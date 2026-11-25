@@ -1,0 +1,41 @@
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/lora';
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens (space-separated RGB so Tailwind opacity modifiers work). Sampled from the approved UI collage. */
+:root {
+  --page: 252 246 237; --surface: 255 253 249; --surface-2: 248 242 232; --line: 230 224 214;
+  --ink: 43 38 34; --muted: 111 103 93; --primary: 59 54 50; --primary-fg: 252 246 237;
+  --terracotta: 177 74 48; --terracotta-soft: 243 214 202; --terracotta-ink: 150 56 34;
+  --olive: 94 122 60; --olive-soft: 223 229 198; --olive-ink: 77 98 44;
+  --dusty: 108 139 168; --dusty-soft: 217 226 235; --dusty-ink: 64 99 130;
+  --amber: 205 150 52; --amber-soft: 245 229 187; --amber-ink: 133 94 20;
+  color-scheme: light;
+}
+[data-theme='dark'] {
+  --page: 28 25 22; --surface: 38 34 30; --surface-2: 47 42 37; --line: 66 60 53;
+  --ink: 240 232 220; --muted: 168 158 145; --primary: 240 232 220; --primary-fg: 28 25 22;
+  --terracotta: 212 117 90; --terracotta-soft: 78 46 37; --terracotta-ink: 232 160 138;
+  --olive: 150 178 106; --olive-soft: 56 66 40; --olive-ink: 190 210 150;
+  --dusty: 134 168 198; --dusty-soft: 44 58 72; --dusty-ink: 170 198 224;
+  --amber: 224 176 84; --amber-soft: 74 60 30; --amber-ink: 236 200 120;
+  color-scheme: dark;
+}
+
+@layer base {
+  html { @apply bg-page text-ink font-sans antialiased; }
+  body { @apply min-h-screen; }
+  h1, h2, h3 { @apply font-serif text-ink; }
+  :focus-visible { @apply outline-none ring-2 ring-olive ring-offset-2 ring-offset-page; }
+  ::selection { background: rgb(var(--olive) / 0.25); }
+}
+
+@layer components {
+  .field-input { @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-muted/70 transition-colors focus:border-olive focus:outline-none focus:ring-2 focus:ring-olive/30 disabled:cursor-not-allowed disabled:bg-surface-2 disabled:text-muted; }
+  .field-input[aria-invalid='true'] { @apply border-terracotta focus:ring-terracotta/30; }
+  .card { @apply rounded-card border border-line bg-surface shadow-card; }
+}
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }

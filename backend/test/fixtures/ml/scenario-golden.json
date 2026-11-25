@@ -1,0 +1,222 @@
+{
+ "name": "golden",
+ "provenance": "pythonResponse produced by the real worktodo_service engine (service layer); camelCase files converted independently",
+ "publicRequest": {
+  "session": {
+   "localTime": "2026-11-16 10:00:00",
+   "availableTimeMinutes": 120,
+   "longestFreeSlotMinutes": 120,
+   "currentTimePeriod": "Morning",
+   "energyLevel": "Medium",
+   "focusLevel": "High"
+  },
+  "tasks": [
+   {
+    "taskId": "T1",
+    "taskName": "Write report",
+    "startDate": "2026-11-01",
+    "dueDate": "2026-11-17",
+    "importance": "Critical",
+    "goalContribution": "High",
+    "consequenceOfDelay": "Major",
+    "complexity": "Simple",
+    "estimatedDurationMinutes": 30,
+    "minimumSessionMinutes": 30,
+    "isSplittable": false,
+    "preferredTime": "Anytime",
+    "dependencyStatus": "No dependency",
+    "status": "Pending"
+   },
+   {
+    "taskId": "T2",
+    "taskName": "Gym session",
+    "startDate": "2026-11-01",
+    "dueDate": null,
+    "importance": "Low",
+    "goalContribution": "High",
+    "consequenceOfDelay": "Major",
+    "complexity": "Simple",
+    "estimatedDurationMinutes": 30,
+    "minimumSessionMinutes": 30,
+    "isSplittable": false,
+    "preferredTime": "Evening",
+    "dependencyStatus": "No dependency",
+    "status": "Pending"
+   },
+   {
+    "taskId": "T3",
+    "taskName": "Old task",
+    "startDate": "2026-11-01",
+    "dueDate": "2026-11-20",
+    "importance": "High",
+    "goalContribution": "High",
+    "consequenceOfDelay": "Major",
+    "complexity": "Simple",
+    "estimatedDurationMinutes": 30,
+    "minimumSessionMinutes": 30,
+    "isSplittable": false,
+    "preferredTime": "Anytime",
+    "dependencyStatus": "No dependency",
+    "status": "Completed"
+   }
+  ]
+ },
+ "pythonRequest": {
+  "session": {
+   "session_timestamp": "2026-11-16 10:00:00",
+   "available_time_minutes": 120,
+   "longest_free_slot_minutes": 120,
+   "current_time_period": "Morning",
+   "energy_level": "Medium",
+   "focus_level": "High"
+  },
+  "tasks": [
+   {
+    "task_id": "T1",
+    "task_name": "Write report",
+    "start_date": "2026-11-01",
+    "due_date": "2026-11-17",
+    "importance": "Critical",
+    "goal_contribution": "High",
+    "consequence_of_delay": "Major",
+    "complexity": "Simple",
+    "estimated_duration_minutes": 30,
+    "minimum_session_minutes": 30,
+    "is_splittable": false,
+    "preferred_time": "Anytime",
+    "dependency_status": "No dependency",
+    "status": "Pending"
+   },
+   {
+    "task_id": "T2",
+    "task_name": "Gym session",
+    "start_date": "2026-11-01",
+    "due_date": null,
+    "importance": "Low",
+    "goal_contribution": "High",
+    "consequence_of_delay": "Major",
+    "complexity": "Simple",
+    "estimated_duration_minutes": 30,
+    "minimum_session_minutes": 30,
+    "is_splittable": false,
+    "preferred_time": "Evening",
+    "dependency_status": "No dependency",
+    "status": "Pending"
+   },
+   {
+    "task_id": "T3",
+    "task_name": "Old task",
+    "start_date": "2026-11-01",
+    "due_date": "2026-11-20",
+    "importance": "High",
+    "goal_contribution": "High",
+    "consequence_of_delay": "Major",
+    "complexity": "Simple",
+    "estimated_duration_minutes": 30,
+    "minimum_session_minutes": 30,
+    "is_splittable": false,
+    "preferred_time": "Anytime",
+    "dependency_status": "No dependency",
+    "status": "Completed"
+   }
+  ]
+ },
+ "pythonResponse": {
+  "ranked": [
+   {
+    "rank": 1,
+    "task_id": "T1",
+    "task_name": "Write report",
+    "ml_score": 88.35416666666667,
+    "category": "Do now",
+    "startable_now": true,
+    "reason": "Drivers: due in 1 day; Critical importance; fits the longest free slot. Held back by: energy/focus fit 62/100.",
+    "urgency": 85.0,
+    "importance": 100.0,
+    "goal_contribution": 75.0,
+    "feasibility": 100.0,
+    "consequence_of_delay": 100.0,
+    "timing_suitability": 70.0,
+    "energy_suitability": 62.08333333333333
+   },
+   {
+    "rank": 2,
+    "task_id": "T2",
+    "task_name": "Gym session",
+    "ml_score": 48.10416666666667,
+    "category": "Do next",
+    "startable_now": true,
+    "reason": "Drivers: fits the longest free slot; High goal contribution; Major consequence if delayed. Held back by: no deadline; Low importance; preferred time (Evening) differs from now; energy/focus fit 62/100.",
+    "urgency": 10.0,
+    "importance": 20.0,
+    "goal_contribution": 75.0,
+    "feasibility": 100.0,
+    "consequence_of_delay": 100.0,
+    "timing_suitability": 35.0,
+    "energy_suitability": 62.08333333333333
+   }
+  ],
+  "excluded": [
+   {
+    "task_id": "T3",
+    "exclusion_reason": "Task not active"
+   }
+  ],
+  "summary": {
+   "total_tasks": 3,
+   "eligible": 2,
+   "excluded": 1,
+   "returned": 2,
+   "startable_now": 2
+  }
+ },
+ "publicResponse": {
+  "ranked": [
+   {
+    "rank": 1,
+    "taskId": "T1",
+    "taskName": "Write report",
+    "mlScore": 88.35416666666667,
+    "category": "Do now",
+    "startableNow": true,
+    "reason": "Drivers: due in 1 day; Critical importance; fits the longest free slot. Held back by: energy/focus fit 62/100.",
+    "urgency": 85.0,
+    "importance": 100.0,
+    "goalContribution": 75.0,
+    "feasibility": 100.0,
+    "consequenceOfDelay": 100.0,
+    "timingSuitability": 70.0,
+    "energySuitability": 62.08333333333333
+   },
+   {
+    "rank": 2,
+    "taskId": "T2",
+    "taskName": "Gym session",
+    "mlScore": 48.10416666666667,
+    "category": "Do next",
+    "startableNow": true,
+    "reason": "Drivers: fits the longest free slot; High goal contribution; Major consequence if delayed. Held back by: no deadline; Low importance; preferred time (Evening) differs from now; energy/focus fit 62/100.",
+    "urgency": 10.0,
+    "importance": 20.0,
+    "goalContribution": 75.0,
+    "feasibility": 100.0,
+    "consequenceOfDelay": 100.0,
+    "timingSuitability": 35.0,
+    "energySuitability": 62.08333333333333
+   }
+  ],
+  "excluded": [
+   {
+    "taskId": "T3",
+    "exclusionReason": "Task not active"
+   }
+  ],
+  "summary": {
+   "totalTasks": 3,
+   "eligible": 2,
+   "excluded": 1,
+   "returned": 2,
+   "startableNow": 2
+  }
+ }
+}

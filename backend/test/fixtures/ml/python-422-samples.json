@@ -1,0 +1,393 @@
+{
+ "provenance": "bodies built by the real Python error builders (app.errors) from real engine InputValidationError messages; pydantic-style entries are synthetic inputs to the real builder",
+ "samples": [
+  {
+   "label": "invalid importance",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "importance",
+      "message": "importance has invalid value(s) 'Urgent'; allowed: ['Critical', 'High', 'Low', 'Medium'] (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "invalid complexity+preferred",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "complexity",
+      "message": "complexity has invalid value(s) 'x'; allowed: ['Complex', 'Moderate', 'Simple'] (task_id: A)"
+     },
+     {
+      "field": "preferred_time",
+      "message": "preferred_time has invalid value(s) 'Noon'; allowed: ['Afternoon', 'Anytime', 'Evening', 'Morning', 'Night'] (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "duplicate ids",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": null,
+      "message": "duplicate task_id: D"
+     }
+    ]
+   }
+  },
+  {
+   "label": "missing is_splittable column",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": null,
+      "message": "missing required task field(s): is_splittable"
+     }
+    ]
+   }
+  },
+  {
+   "label": "null status",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "status",
+      "message": "status is missing (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "null is_splittable",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "is_splittable",
+      "message": "is_splittable is missing (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "string is_splittable",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "is_splittable",
+      "message": "is_splittable must be true or false (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "negative duration",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "estimated_duration_minutes",
+      "message": "estimated_duration_minutes must not be negative (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "zero duration",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "estimated_duration_minutes",
+      "message": "estimated_duration_minutes must not be zero (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "non-numeric duration",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "estimated_duration_minutes",
+      "message": "estimated_duration_minutes must be a number (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "splittable min > duration",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "minimum_session_minutes",
+      "message": "minimum_session_minutes must not exceed estimated_duration_minutes for splittable tasks (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "splittable min missing",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "minimum_session_minutes",
+      "message": "minimum_session_minutes must be a number greater than 0 for splittable tasks (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "invalid due date",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "due_date",
+      "message": "due_date is not a valid date (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "invalid start date",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "start_date",
+      "message": "start_date is not a valid date (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "tz offset due_date",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "due_date",
+      "message": "due_date: timezone offsets are not supported; send local date/time without a timezone"
+     }
+    ]
+   }
+  },
+  {
+   "label": "tz offset session",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "session_timestamp",
+      "message": "session_timestamp: timezone offsets are not supported; send local date/time without a timezone"
+     }
+    ]
+   }
+  },
+  {
+   "label": "invalid session period",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "current_time_period",
+      "message": "current_time_period 'Noon' is invalid; allowed: ['Afternoon', 'Evening', 'Morning', 'Night']"
+     }
+    ]
+   }
+  },
+  {
+   "label": "invalid energy",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "energy_level",
+      "message": "energy_level 'x' is invalid; allowed: ['High', 'Low', 'Medium']"
+     }
+    ]
+   }
+  },
+  {
+   "label": "negative available",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "available_time_minutes",
+      "message": "available_time_minutes must not be negative (-5); zero is allowed"
+     }
+    ]
+   }
+  },
+  {
+   "label": "non-numeric slot",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "longest_free_slot_minutes",
+      "message": "longest_free_slot_minutes must be a number ('x')"
+     }
+    ]
+   }
+  },
+  {
+   "label": "invalid session timestamp",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "session_timestamp",
+      "message": "session_timestamp is not a valid date/time ('garbage')"
+     }
+    ]
+   }
+  },
+  {
+   "label": "bad dependency",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "dependency_status",
+      "message": "dependency_status invalid; allowed ['Blocked', 'No dependency', 'Ready'] or null (task_id: A)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "blank task id",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "task_id",
+      "message": "task_id is missing or blank (row(s) [0])"
+     }
+    ]
+   }
+  },
+  {
+   "label": "missing session field",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "energy_level",
+      "message": "energy_level is missing"
+     }
+    ]
+   }
+  },
+  {
+   "label": "many problems at once",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "available_time_minutes",
+      "message": "available_time_minutes must not be negative (-1); zero is allowed"
+     },
+     {
+      "field": "current_time_period",
+      "message": "current_time_period 'Noon' is invalid; allowed: ['Afternoon', 'Evening', 'Morning', 'Night']"
+     },
+     {
+      "field": "status",
+      "message": "status is missing (task_id: A)"
+     },
+     {
+      "field": "estimated_duration_minutes",
+      "message": "estimated_duration_minutes must not be negative (task_id: A)"
+     },
+     {
+      "field": "importance",
+      "message": "importance has invalid value(s) 'x'; allowed: ['Critical', 'High', 'Low', 'Medium'] (task_id: A)"
+     },
+     {
+      "field": "due_date",
+      "message": "due_date is not a valid date (task_id: B)"
+     }
+    ]
+   }
+  },
+  {
+   "label": "pydantic: session missing",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "session",
+      "message": "Field required"
+     }
+    ]
+   }
+  },
+  {
+   "label": "pydantic: tasks wrong type",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "tasks",
+      "message": "Input should be a valid list"
+     }
+    ]
+   }
+  },
+  {
+   "label": "pydantic: nested",
+   "body": {
+    "error": "validation_error",
+    "message": "Request validation failed",
+    "errors": [
+     {
+      "field": "tasks.0.is_splittable",
+      "message": "Field required"
+     }
+    ]
+   }
+  }
+ ]
+}

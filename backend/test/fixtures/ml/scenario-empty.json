@@ -1,0 +1,48 @@
+{
+ "name": "empty",
+ "provenance": "pythonResponse produced by the real worktodo_service engine (service layer); camelCase files converted independently",
+ "publicRequest": {
+  "session": {
+   "localTime": "2026-11-16 10:00:00",
+   "availableTimeMinutes": 120,
+   "longestFreeSlotMinutes": 120,
+   "currentTimePeriod": "Morning",
+   "energyLevel": "Medium",
+   "focusLevel": "High"
+  },
+  "tasks": []
+ },
+ "pythonRequest": {
+  "session": {
+   "session_timestamp": "2026-11-16 10:00:00",
+   "available_time_minutes": 120,
+   "longest_free_slot_minutes": 120,
+   "current_time_period": "Morning",
+   "energy_level": "Medium",
+   "focus_level": "High"
+  },
+  "tasks": []
+ },
+ "pythonResponse": {
+  "ranked": [],
+  "excluded": [],
+  "summary": {
+   "total_tasks": 0,
+   "eligible": 0,
+   "excluded": 0,
+   "returned": 0,
+   "startable_now": 0
+  }
+ },
+ "publicResponse": {
+  "ranked": [],
+  "excluded": [],
+  "summary": {
+   "totalTasks": 0,
+   "eligible": 0,
+   "excluded": 0,
+   "returned": 0,
+   "startableNow": 0
+  }
+ }
+}

@@ -1,0 +1,415 @@
+// WorkToDo database schema. Domain values are Strings (CHECK-constrained in the migration) so DB value = API value = Python value.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String               @id @default(uuid()) @db.Uuid
+  fullName            String               @db.VarChar(120)
+  email               String               @unique @db.VarChar(254)
+  passwordHash        String               @db.VarChar(255)
+  isEmailVerified     Boolean              @default(false)
+  isActive            Boolean              @default(true)
+  createdAt           DateTime             @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime             @updatedAt @db.Timestamptz(3)
+  preferences         UserPreferences?
+  authSessions        AuthSession[]
+  passwordResetTokens PasswordResetToken[]
+  tasks               Task[]
+  focusSessions       FocusSession[]
+  recommendationRuns  RecommendationRun[]
+  taskDependencies    TaskDependency[]
+  focusTimers         FocusTimer[]
+  feedback            RecommendationFeedback[]
+  appointments        Appointment[]
+  appointmentHistory  AppointmentHistory[]
+  unavailablePeriods  UnavailablePeriod[]
+  scheduleVersions    ScheduleVersion[]
+  scheduledBlocks     ScheduledBlock[]
+  taskPostponements   TaskPostponement[]
+}
+
+model UserPreferences {
+  id                     String   @id @default(uuid()) @db.Uuid
+  userId                 String   @unique @db.Uuid
+  defaultEnergyLevel     String   @default("Medium") @db.VarChar(10)
+  defaultFocusLevel      String   @default("Medium") @db.VarChar(10)
+  preferredTimePeriod    String   @default("Morning") @db.VarChar(10)
+  themePreference        String   @default("light") @db.VarChar(10)
+  notificationPreference String   @default("important") @db.VarChar(10)
+  timeZone               String   @default("Asia/Kolkata") @db.VarChar(64)
+  workDayStart           String   @default("09:00") @db.VarChar(5)
+  workDayEnd             String   @default("18:00") @db.VarChar(5)
+  workDays               String   @default("1,2,3,4,5") @db.VarChar(13)
+  breaksEnabled          Boolean  @default(true)
+  breakMinutes           Int      @default(10)
+  breakAfterMinutes      Int      @default(90)
+  planningHorizonDays    Int      @default(7)
+  createdAt              DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime @updatedAt @db.Timestamptz(3)
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AuthSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
+  familyId         String    @db.Uuid
+  refreshTokenHash String    @unique @db.VarChar(64)
+  rememberMe       Boolean   @default(false)
+  expiresAt        DateTime  @db.Timestamptz(3)
+  revokedAt        DateTime? @db.Timestamptz(3)
+  replacedById     String?   @db.Uuid
+  lastUsedAt       DateTime? @db.Timestamptz(3)
+  userAgent        String?   @db.VarChar(255)
+  createdAt        DateTime  @default(now()) @db.Timestamptz(3)
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique @db.VarChar(64)
+  expiresAt DateTime  @db.Timestamptz(3)
+  usedAt    DateTime? @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @db.Timestamptz(3)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Task {
+  id                       String                    @id @default(uuid()) @db.Uuid
+  userId                   String                    @db.Uuid
+  taskName                 String                    @db.VarChar(200)
+  description              String?                   @db.Text
+  startDate                DateTime?                 @db.Date
+  dueDate                  DateTime?                 @db.Date
+  importance               String                    @db.VarChar(10)
+  importanceRank           Int
+  goalContribution         String                    @db.VarChar(20)
+  consequenceOfDelay       String                    @db.VarChar(20)
+  complexity               String                    @default("Moderate") @db.VarChar(10)
+  estimatedDurationMinutes Int
+  minimumSessionMinutes    Int?
+  isSplittable             Boolean                   @default(false)
+  preferredTime            String                    @default("Anytime") @db.VarChar(10)
+  dependencyStatus         String                    @default("No dependency") @db.VarChar(20)
+  status                   String                    @default("Pending") @db.VarChar(20)
+  createdAt                DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt                DateTime                  @updatedAt @db.Timestamptz(3)
+  completedAt              DateTime?                 @db.Timestamptz(3)
+  deletedAt                DateTime?                 @db.Timestamptz(3)
+  postponedUntil           DateTime?                 @db.Date
+  postponeCount            Int                       @default(0)
+  user                     User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scheduledBlocks          ScheduledBlock[]
+  postponements            TaskPostponement[]
+  recommendationItems      RecommendationItem[]
+  recommendationExclusions RecommendationExclusion[]
+  prerequisites            TaskDependency[]          @relation("DependentTask")
+  dependents               TaskDependency[]          @relation("PrerequisiteTask")
+  focusTimers              FocusTimer[]
+  feedback                 RecommendationFeedback[]
+
+  @@unique([id, userId])
+  @@index([userId, deletedAt, status])
+  @@index([userId, deletedAt, dueDate])
+  @@index([userId, deletedAt, createdAt])
+  @@index([userId, completedAt])
+}
+
+model FocusSession {
+  id                     String              @id @default(uuid()) @db.Uuid
+  userId                 String              @db.Uuid
+  sessionDateTime        DateTime            @db.Timestamp(0)
+  availableTimeMinutes   Int
+  longestFreeSlotMinutes Int
+  currentTimePeriod      String              @db.VarChar(10)
+  energyLevel            String              @db.VarChar(10)
+  focusLevel             String              @db.VarChar(10)
+  createdAt              DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime            @updatedAt @db.Timestamptz(3)
+  user                   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recommendationRuns     RecommendationRun[]
+  focusTimers            FocusTimer[]
+
+  @@index([userId, sessionDateTime])
+}
+
+model RecommendationRun {
+  id                     String                    @id @default(uuid()) @db.Uuid
+  userId                 String                    @db.Uuid
+  focusSessionId         String?                   @db.Uuid
+  sessionDateTime        DateTime                  @db.Timestamp(0)
+  availableTimeMinutes   Int
+  longestFreeSlotMinutes Int
+  currentTimePeriod      String                    @db.VarChar(10)
+  energyLevel            String                    @db.VarChar(10)
+  focusLevel             String                    @db.VarChar(10)
+  topK                   Int?
+  totalTasks             Int
+  eligibleTasks          Int
+  excludedTasks          Int
+  returnedTasks          Int
+  startableTasks         Int
+  createdAt              DateTime                  @default(now()) @db.Timestamptz(3)
+  user                   User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  focusSession           FocusSession?             @relation(fields: [focusSessionId], references: [id], onDelete: SetNull)
+  items                  RecommendationItem[]
+  exclusions             RecommendationExclusion[]
+  feedback               RecommendationFeedback[]
+
+  @@unique([id, userId])
+  @@index([userId, createdAt])
+  @@index([focusSessionId])
+}
+
+model RecommendationItem {
+  id                  String            @id @default(uuid()) @db.Uuid
+  recommendationRunId String            @db.Uuid
+  taskId              String?           @db.Uuid
+  taskNameSnapshot    String            @db.VarChar(200)
+  taskSnapshot        Json
+  rank                Int
+  mlScore             Float
+  category            String            @db.VarChar(30)
+  startableNow        Boolean
+  reason              String            @db.Text
+  urgency             Float
+  importance          Float
+  goalContribution    Float
+  feasibility         Float
+  consequenceOfDelay  Float
+  timingSuitability   Float
+  energySuitability   Float
+  run                 RecommendationRun @relation(fields: [recommendationRunId], references: [id], onDelete: Cascade)
+  task                Task?             @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  feedback            RecommendationFeedback[]
+
+  @@unique([id, recommendationRunId])
+  @@unique([recommendationRunId, rank])
+  @@unique([recommendationRunId, taskId])
+  @@index([taskId])
+}
+
+model RecommendationExclusion {
+  id                  String            @id @default(uuid()) @db.Uuid
+  recommendationRunId String            @db.Uuid
+  taskId              String?           @db.Uuid
+  taskNameSnapshot    String            @db.VarChar(200)
+  taskSnapshot        Json
+  exclusionReason     String            @db.VarChar(100)
+  run                 RecommendationRun @relation(fields: [recommendationRunId], references: [id], onDelete: Cascade)
+  task                Task?             @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@unique([recommendationRunId, taskId])
+  @@index([taskId])
+}
+
+model TaskDependency {
+  id              String   @id @default(uuid()) @db.Uuid
+  userId          String   @db.Uuid
+  taskId          String   @db.Uuid
+  dependsOnTaskId String   @db.Uuid
+  createdAt       DateTime @default(now()) @db.Timestamptz(3)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task            Task     @relation("DependentTask", fields: [taskId, userId], references: [id, userId], onDelete: Cascade)
+  dependsOn       Task     @relation("PrerequisiteTask", fields: [dependsOnTaskId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@unique([taskId, dependsOnTaskId])
+  @@index([userId])
+  @@index([dependsOnTaskId])
+}
+
+/// Persistent focus timer. Elapsed time is derived from these server timestamps + FocusTimerPause rows (never from the browser).
+/// Migration also creates partial unique indexes (one active timer per user; one open pause per timer) that Prisma cannot express.
+model FocusTimer {
+  id                     String            @id @default(uuid()) @db.Uuid
+  userId                 String            @db.Uuid
+  taskId                 String?           @db.Uuid
+  taskNameSnapshot       String?           @db.VarChar(200)
+  focusSessionId         String?           @db.Uuid
+  status                 String            @db.VarChar(10)
+  plannedDurationMinutes Int
+  startedAt              DateTime          @db.Timestamptz(3)
+  endedAt                DateTime?         @db.Timestamptz(3)
+  actualFocusedSeconds   Int?
+  totalPausedSeconds     Int?
+  createdAt              DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime          @updatedAt @db.Timestamptz(3)
+  user                   User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task                   Task?             @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  focusSession           FocusSession?     @relation(fields: [focusSessionId], references: [id], onDelete: SetNull)
+  pauses                 FocusTimerPause[]
+
+  @@index([userId, startedAt])
+  @@index([userId, status])
+  @@index([taskId])
+}
+
+model FocusTimerPause {
+  id           String     @id @default(uuid()) @db.Uuid
+  focusTimerId String     @db.Uuid
+  pausedAt     DateTime   @db.Timestamptz(3)
+  resumedAt    DateTime?  @db.Timestamptz(3)
+  timer        FocusTimer @relation(fields: [focusTimerId], references: [id], onDelete: Cascade)
+
+  @@index([focusTimerId])
+}
+
+model RecommendationFeedback {
+  id                   String             @id @default(uuid()) @db.Uuid
+  userId               String             @db.Uuid
+  recommendationRunId  String             @db.Uuid
+  recommendationItemId String             @db.Uuid
+  taskId               String?            @db.Uuid
+  feedbackType         String             @db.VarChar(20)
+  comment              String?            @db.VarChar(500)
+  createdAt            DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt            DateTime           @updatedAt @db.Timestamptz(3)
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  run                  RecommendationRun  @relation(fields: [recommendationRunId, userId], references: [id, userId], onDelete: Cascade)
+  item                 RecommendationItem @relation(fields: [recommendationItemId, recommendationRunId], references: [id, recommendationRunId], onDelete: Cascade)
+  task                 Task?              @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, recommendationItemId])
+  @@index([recommendationRunId])
+  @@index([taskId])
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// Daily planner (migration 20261127000000_planner). Wall-clock columns are TIMESTAMP(0) WITHOUT zone (same design as FocusSession).
+// CHECKs, composite owner FKs and the partial unique indexes (one draft / one approved schedule per user) live in the SQL migration.
+// Apply with `prisma migrate deploy`.
+// ---------------------------------------------------------------------------------------------------------------------------
+model Appointment {
+  id                       String   @id @default(uuid()) @db.Uuid
+  userId                   String   @db.Uuid
+  title                    String   @db.VarChar(200)
+  description              String?  @db.Text
+  location                 String?  @db.VarChar(200)
+  startAt                  DateTime @db.Timestamp(0)
+  endAt                    DateTime @db.Timestamp(0)
+  preparationBufferMinutes Int      @default(0)
+  travelBufferMinutes      Int      @default(0)
+  importance               String   @default("Medium") @db.VarChar(10)
+  consequenceOfDelay       String   @default("Moderate") @db.VarChar(20)
+  status                   String   @default("scheduled") @db.VarChar(12)
+  cancelledAt              DateTime? @db.Timestamptz(3)
+  revision                 Int      @default(1)
+  createdAt                DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt                DateTime @updatedAt @db.Timestamptz(3)
+  user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  history                  AppointmentHistory[]
+
+  @@unique([id, userId])
+  @@index([userId, status, startAt])
+}
+
+model AppointmentHistory {
+  id              String    @id @default(uuid()) @db.Uuid
+  appointmentId   String    @db.Uuid
+  userId          String    @db.Uuid
+  action          String    @db.VarChar(12)
+  previousStartAt DateTime? @db.Timestamp(0)
+  previousEndAt   DateTime? @db.Timestamp(0)
+  newStartAt      DateTime? @db.Timestamp(0)
+  newEndAt        DateTime? @db.Timestamp(0)
+  previousTitle   String?   @db.VarChar(200)
+  note            String?   @db.VarChar(300)
+  createdAt       DateTime  @default(now()) @db.Timestamptz(3)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointment     Appointment @relation(fields: [appointmentId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@index([appointmentId, createdAt])
+}
+
+model UnavailablePeriod {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  label     String   @db.VarChar(100)
+  startAt   DateTime @db.Timestamp(0)
+  endAt     DateTime @db.Timestamp(0)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startAt])
+}
+
+model ScheduleVersion {
+  id                  String    @id @default(uuid()) @db.Uuid
+  userId              String    @db.Uuid
+  versionNumber       Int
+  status              String    @db.VarChar(12)
+  revision            Int       @default(1)
+  mode                String    @db.VarChar(10)
+  orderSource         String    @db.VarChar(10)
+  horizonFrom         DateTime  @db.Date
+  horizonTo           DateTime  @db.Date
+  generatedAtLocal    DateTime  @db.Timestamp(0)
+  inputHash           String    @db.VarChar(64)
+  basedOnId           String?   @db.Uuid
+  recommendationRunId String?   @db.Uuid
+  summary             Json
+  createdAt           DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime  @updatedAt @db.Timestamptz(3)
+  approvedAt          DateTime? @db.Timestamptz(3)
+  rejectedAt          DateTime? @db.Timestamptz(3)
+  supersededAt        DateTime? @db.Timestamptz(3)
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  blocks              ScheduledBlock[]
+
+  @@unique([id, userId])
+  @@unique([userId, versionNumber])
+  @@index([userId, status])
+}
+
+model ScheduledBlock {
+  id                String   @id @default(uuid()) @db.Uuid
+  scheduleVersionId String   @db.Uuid
+  userId            String   @db.Uuid
+  kind              String   @db.VarChar(8)
+  taskId            String?  @db.Uuid
+  taskNameSnapshot  String?  @db.VarChar(200)
+  startAt           DateTime @db.Timestamp(0)
+  endAt             DateTime @db.Timestamp(0)
+  sessionIndex      Int      @default(1)
+  sessionCount      Int      @default(1)
+  source            String   @default("engine") @db.VarChar(8)
+  status            String   @default("planned") @db.VarChar(10)
+  reason            String?  @db.Text
+  warnings          Json?
+  createdAt         DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @db.Timestamptz(3)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version           ScheduleVersion @relation(fields: [scheduleVersionId, userId], references: [id, userId], onDelete: Cascade)
+  task              Task?    @relation(fields: [taskId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@index([scheduleVersionId, startAt])
+  @@index([userId, startAt])
+  @@index([taskId])
+}
+
+model TaskPostponement {
+  id                    String    @id @default(uuid()) @db.Uuid
+  userId                String    @db.Uuid
+  taskId                String    @db.Uuid
+  originalDueDate       DateTime? @db.Date
+  previousPostponedUntil DateTime? @db.Date
+  newPostponedUntil     DateTime  @db.Date
+  reason                String?   @db.VarChar(200)
+  createdAt             DateTime  @default(now()) @db.Timestamptz(3)
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  task                  Task      @relation(fields: [taskId, userId], references: [id, userId], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@index([userId, createdAt])
+}

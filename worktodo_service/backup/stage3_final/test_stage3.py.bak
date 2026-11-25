@@ -1,0 +1,387 @@
+"""Stage 3 tests: timing/energy suitability, categorical validation, explanations, unusual scenarios, tie-break regression.
+Run from worktodo_service/:  python -m unittest tests.test_stage3 -v
+Set WT_MODULE_DIR to test a different copy of worktodo_features.py (e.g. backup/stage2_final)."""
+import importlib.util, itertools, json, os, re, sys, time, unittest, warnings
+from pathlib import Path
+import numpy as np, pandas as pd
+
+warnings.filterwarnings('ignore')
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tests')); sys.path.insert(0, os.environ.get('WT_MODULE_DIR', str(ROOT)))
+import worktodo_features as wf
+from test_stage2 import MODEL, StubModel, task, sess, rank, ValidationError
+
+PERIODS = ['Morning', 'Afternoon', 'Evening', 'Night']
+LEVELS = ['Low', 'Medium', 'High']
+COMPLEX = ['Simple', 'Moderate', 'Complex']
+# Independent expected energy/focus suitability (taken from the original dataset's feature table): (energy, focus, complexity) -> score
+_E = {'Simple': [100, 83.75, 78 + 1 / 3, 83.75, 67.5, 62 + 1 / 12, 78 + 1 / 3, 62 + 1 / 12, 56 + 2 / 3],
+      'Moderate': [67.5, 83.75, 72 + 11 / 12, 83.75, 100, 89 + 1 / 6, 72 + 11 / 12, 89 + 1 / 6, 78 + 1 / 3],
+      'Complex': [56 + 2 / 3, 67.5, 78 + 1 / 3, 67.5, 78 + 1 / 3, 89 + 1 / 6, 78 + 1 / 3, 89 + 1 / 6, 100]}
+EXPECTED_ENERGY = {(e, f, c): _E[c][i] for c in COMPLEX for i, (e, f) in enumerate(itertools.product(LEVELS, LEVELS))}
+
+
+def reason(t, **s):
+    r, _ = rank([t], **s); return r.iloc[0].reason
+
+
+def parts(text):
+    head, _, held = text.partition(' Held back by: ')
+    return head.removeprefix('Drivers: ').rstrip('.').split('; '), (held.rstrip('.').split('; ') if held else [])
+
+
+class TestTiming(unittest.TestCase):
+    def test_all_preferred_vs_current_combinations(self):
+        for pref in PERIODS + ['Anytime']:
+            for cur in PERIODS:
+                exp = 70.0 if pref == 'Anytime' else (100.0 if pref == cur else 35.0)
+                r, _ = rank([task('A', preferred_time=pref)], current_time_period=cur)
+                with self.subTest(pref=pref, current=cur):
+                    self.assertEqual(r.iloc[0].timing_suitability, exp)
+                    self.assertEqual(float(wf.timing_score([pref], [cur])[0]), exp)
+
+    def test_anytime_is_neutral_positive_and_never_below_mismatch(self):
+        self.assertTrue(35 < 70 < 100)
+
+
+class TestEnergyFocusComplexity(unittest.TestCase):
+    def test_all_27_combinations(self):
+        for (e, f, c), exp in EXPECTED_ENERGY.items():
+            r, _ = rank([task('A', complexity=c)], energy_level=e, focus_level=f)
+            with self.subTest(energy=e, focus=f, complexity=c):
+                self.assertAlmostEqual(r.iloc[0].energy_suitability, exp, places=6)
+
+    def test_symmetric_in_energy_and_focus_and_bounded(self):
+        for (e, f, c), exp in EXPECTED_ENERGY.items():
+            self.assertAlmostEqual(EXPECTED_ENERGY[(f, e, c)], exp, places=9); self.assertTrue(0 <= exp <= 100)
+
+    def test_perfect_match_when_both_levels_equal_task_demand(self):
+        for lvl, c in zip(LEVELS, COMPLEX): self.assertEqual(EXPECTED_ENERGY[(lvl, lvl, c)], 100)
+
+
+class TestCategoricalAndMissingValues(unittest.TestCase):
+    BAD = ['Urgent', 'high', '', ' High', 123, 'None ']
+
+    def bad(self, t, text, **s):
+        with self.assertRaises(ValidationError) as cm: rank([t], **s)
+        self.assertIn(text, str(cm.exception)); return str(cm.exception)
+
+    def test_invalid_task_categoricals(self):
+        for col in ['importance', 'goal_contribution', 'consequence_of_delay', 'complexity', 'preferred_time']:
+            for v in self.BAD:
+                with self.subTest(col=col, value=v):
+                    msg = self.bad(task('A', **{col: v}), f'{col} has invalid value(s)')
+                    self.assertIn('allowed:', msg); self.assertIn('task_id: A', msg)
+
+    def test_invalid_session_categoricals(self):
+        for col in ['current_time_period', 'energy_level', 'focus_level']:
+            for v in ['Noon', 'low', '', 5]:
+                with self.subTest(col=col, value=v):
+                    msg = self.bad(task('A'), f'{col} {v!r} is invalid', **{col: v}); self.assertIn('allowed', msg)
+
+    def test_anytime_is_not_a_valid_current_period(self):
+        self.bad(task('A'), 'current_time_period', current_time_period='Anytime')
+
+    def test_missing_task_values(self):
+        for col in ['importance', 'goal_contribution', 'consequence_of_delay', 'complexity', 'estimated_duration_minutes', 'preferred_time', 'status', 'is_splittable']:
+            for v in (None, np.nan, pd.NA):
+                with self.subTest(col=col, value=repr(v)):
+                    self.bad(task('A', **{col: v}), f'{col} is missing')
+
+    def test_missing_session_values(self):
+        for col in ['session_timestamp', 'available_time_minutes', 'longest_free_slot_minutes', 'current_time_period', 'energy_level', 'focus_level']:
+            for v in (None, np.nan):
+                with self.subTest(col=col, value=repr(v)):
+                    self.bad(task('A'), f'{col} is missing', **{col: v})
+
+    def test_both_consequence_none_spellings_valid(self):
+        for v in ('None', 'No consequence'):
+            r, _ = rank([task('A', consequence_of_delay=v)]); self.assertEqual(r.iloc[0].consequence_of_delay, 0)
+
+    def test_all_errors_listed_together(self):
+        with self.assertRaises(ValidationError) as cm: rank([task('A', importance='x', complexity='y', preferred_time='z')], energy_level='q')
+        m = str(cm.exception)
+        for k in ['importance', 'complexity', 'preferred_time', 'energy_level']: self.assertIn(k, m)
+
+
+class TestExplanations(unittest.TestCase):
+    def row(self, **kw):
+        base = dict(importance_label='High', goal_label='High', consequence_label='Major', preferred_time='Morning', days_until_deadline=3.0,
+                    urgency=70, importance=80, goal_contribution=75, feasibility=100, consequence_of_delay=100, timing_suitability=100, energy_suitability=100)
+        base.update(kw); return base
+
+    def test_factor_text_mapping_all_seven(self):
+        T = lambda n, **kw: wf._factor_text(n, self.row(**kw))
+        self.assertEqual(T('urgency', days_until_deadline=-5.0), 'overdue by 5 days')
+        self.assertEqual(T('urgency', days_until_deadline=-1.0), 'overdue by 1 day')
+        self.assertEqual(T('urgency', days_until_deadline=0.0), 'due today')
+        self.assertEqual(T('urgency', days_until_deadline=1.0), 'due in 1 day')
+        self.assertEqual(T('urgency', days_until_deadline=14.0), 'due in 14 days')
+        self.assertEqual(T('urgency', days_until_deadline=np.nan), 'no deadline')
+        for lab in ['Critical', 'High', 'Medium', 'Low']: self.assertEqual(T('importance', importance_label=lab), f'{lab} importance')
+        self.assertEqual(T('goal_contribution', goal_contribution=0), 'no linked goal')
+        self.assertEqual(T('goal_contribution', goal_label='Essential'), 'Essential goal contribution')
+        for lab in ['Major', 'Significant', 'Moderate', 'Minor']: self.assertEqual(T('consequence_of_delay', consequence_label=lab), f'{lab} consequence if delayed')
+        for lab in ['None', 'No consequence']: self.assertEqual(T('consequence_of_delay', consequence_label=lab), 'No consequence if delayed')   # user's wording fix
+        self.assertEqual(T('feasibility', feasibility=100), 'fits the longest free slot')
+        self.assertEqual(T('feasibility', feasibility=75), 'partial progress possible in the free slot')
+        self.assertEqual(T('feasibility', feasibility=13), 'does not fit the free slot')
+        self.assertEqual(T('timing_suitability', timing_suitability=100), 'matches preferred time of day')
+        self.assertEqual(T('timing_suitability', timing_suitability=70), 'Anytime task')
+        self.assertEqual(T('timing_suitability', timing_suitability=35, preferred_time='Evening'), 'preferred time (Evening) differs from now')
+        self.assertEqual(T('energy_suitability', energy_suitability=62.08), 'energy/focus fit 62/100')
+
+    def test_singular_plural_in_full_reasons(self):
+        for due, exp in [('2026-11-15', 'overdue by 1 day'), ('2026-11-11', 'overdue by 5 days'), ('2026-11-17', 'due in 1 day'), ('2026-11-19', 'due in 3 days'), ('2026-11-16', 'due today')]:
+            with self.subTest(due=due):
+                text = reason(task('A', due_date=due, importance='Low'))
+                self.assertIn(exp + (';' if exp.endswith(('day', 'days', 'today')) else ''), text + ';')
+                self.assertNotIn('(s)', text)
+                if exp.endswith('1 day'): self.assertNotRegex(text, r'\b1 days\b')
+
+    def test_no_deadline_reported_as_held_back(self):
+        _, held = parts(reason(task('A', due_date=None)))
+        self.assertIn('no deadline', held)
+
+    def test_goal_and_importance_weaknesses(self):
+        _, held = parts(reason(task('A', importance='Low', goal_contribution='No linked goal', due_date=None)))
+        self.assertIn('Low importance', held); self.assertIn('no linked goal', held)
+
+    def test_consequence_wording_driver_and_held_back(self):
+        drivers, _ = parts(reason(task('A', consequence_of_delay='Major', due_date='2026-11-10', importance='Low', goal_contribution='No linked goal')))
+        self.assertIn('Major consequence if delayed', drivers + _)
+        for v in ('None', 'No consequence'):
+            _, held = parts(reason(task('A', consequence_of_delay=v)))
+            self.assertIn('No consequence if delayed', held)
+        _, held = parts(reason(task('A', consequence_of_delay='Minor'))); self.assertIn('Minor consequence if delayed', held)
+
+    def test_preferred_time_mismatch_for_every_pair(self):
+        for pref, cur in itertools.permutations(PERIODS, 2):
+            with self.subTest(pref=pref, current=cur):
+                drivers, held = parts(reason(task('A', preferred_time=pref), current_time_period=cur))
+                self.assertIn(f'preferred time ({pref}) differs from now', held)
+                self.assertFalse(any('matches preferred time' in x for x in drivers + held))
+
+    def test_preferred_time_match_and_anytime_not_held_back(self):
+        _, held = parts(reason(task('A', preferred_time='Morning'), current_time_period='Morning'))
+        self.assertFalse(any('preferred time' in x for x in held))
+        _, held = parts(reason(task('A', preferred_time='Anytime'), current_time_period='Night'))
+        self.assertFalse(any('differs' in x for x in held))
+
+    def test_insufficient_time_explanations(self):
+        cases = [dict(task=task('A', estimated_duration_minutes=60, minimum_session_minutes=60), s=dict(available_time_minutes=120, longest_free_slot_minutes=20)),
+                 dict(task=task('A', estimated_duration_minutes=60, minimum_session_minutes=60), s=dict(available_time_minutes=0, longest_free_slot_minutes=0)),
+                 dict(task=task('A', estimated_duration_minutes=90, minimum_session_minutes=45, is_splittable=True), s=dict(available_time_minutes=30, longest_free_slot_minutes=30))]
+        for c in cases:
+            with self.subTest(case=c['s']):
+                _, held = parts(reason(c['task'], **c['s']))
+                self.assertIn('does not fit the free slot', held)
+
+    def test_partial_progress_and_fits(self):
+        low = dict(importance='Low', goal_contribution='No linked goal', consequence_of_delay='No consequence', due_date=None)
+        txt = reason(task('A', estimated_duration_minutes=90, minimum_session_minutes=15, is_splittable=True, **low), available_time_minutes=45, longest_free_slot_minutes=45)
+        self.assertIn('partial progress possible in the free slot', txt)
+        txt = reason(task('A', estimated_duration_minutes=15, minimum_session_minutes=15, **low), available_time_minutes=45, longest_free_slot_minutes=45)
+        self.assertIn('fits the longest free slot', txt); self.assertNotIn('does not fit', txt)
+
+    def test_weak_factor_is_never_called_a_driver(self):
+        for imp, text in [('Low', 'Low importance'), ('Medium', 'Medium importance')]:
+            drivers, held = parts(reason(task('A', importance=imp, goal_contribution='No linked goal', consequence_of_delay='No consequence', due_date=None)))
+            self.assertEqual(text in held, imp == 'Low'); self.assertEqual(text in drivers, imp != 'Low')
+            self.assertNotIn('no linked goal', drivers); self.assertNotIn('no deadline', drivers)
+
+    def test_no_strong_factors(self):
+        t = task('A', due_date=None, importance='Low', goal_contribution='No linked goal', consequence_of_delay='No consequence', estimated_duration_minutes=60, minimum_session_minutes=60, preferred_time='Morning')
+        txt = reason(t, available_time_minutes=10, longest_free_slot_minutes=10, current_time_period='Night', energy_level='High', focus_level='High')
+        self.assertTrue(txt.startswith('Drivers: no strong factors. Held back by: ')); self.assertIn('does not fit the free slot', txt)
+
+    def test_energy_mismatch_reported_only_when_meaningful(self):
+        for e, f, c in itertools.product(LEVELS, LEVELS, COMPLEX):
+            score = EXPECTED_ENERGY[(e, f, c)]
+            drivers, held = parts(reason(task('A', complexity=c), energy_level=e, focus_level=f))
+            flagged = any(x.startswith('energy/focus fit') for x in held)
+            with self.subTest(energy=e, focus=f, complexity=c, score=round(score, 1)):
+                if score <= 69: self.assertTrue(flagged or any(x.startswith('energy/focus fit') for x in drivers))
+                else: self.assertFalse(flagged)
+
+    def test_grammar_and_structure_on_random_tasks(self):
+        rng = np.random.RandomState(0)
+        tasks = [task(f'R{i}', due_date=rng.choice([None, '2026-11-01', '2026-11-15', '2026-11-16', '2026-11-17', '2026-11-19', '2026-12-30']),
+                      importance=rng.choice(list(wf.IMPORTANCE_MAP)), goal_contribution=rng.choice(list(wf.GOAL_MAP)),
+                      consequence_of_delay=rng.choice(list(wf.CONSEQUENCE_MAP)), complexity=rng.choice(COMPLEX),
+                      preferred_time=rng.choice(PERIODS + ['Anytime']), estimated_duration_minutes=int(rng.choice([5, 15, 30, 60, 120])),
+                      minimum_session_minutes=5, is_splittable=bool(rng.rand() < .5))
+                 for i in range(300)]
+        for t in tasks:
+            if not t['is_splittable']: t['minimum_session_minutes'] = t['estimated_duration_minutes']
+        r, _ = rank(tasks, available_time_minutes=45, longest_free_slot_minutes=30, current_time_period='Afternoon', energy_level='High', focus_level='Low')
+        for _, x in r.iterrows():
+            txt = x.reason
+            with self.subTest(task=x.task_id):
+                self.assertTrue(txt.startswith('Drivers: ') and txt.endswith('.'))
+                for bad in ['(s)', 'nan', 'None', '  ', ';;', '; .', '..']: self.assertNotIn(bad, txt)
+                drivers, held = parts(txt)
+                weak = [k for k in wf.FEATURES if x[k] <= wf.WEAK_MAX.get(k, 40)]
+                strong = [k for k in wf.FEATURES if k not in weak]
+                top = sorted(strong, key=lambda k: wf.WEIGHTS[k] * x[k], reverse=True)[:3]
+                self.assertEqual(drivers, [wf._factor_text(k, x) for k in top] if top else ['no strong factors'])
+                self.assertEqual(held, [wf._factor_text(k, x) for k in weak])           # every weak factor explained, none called a driver
+                self.assertTrue(len(drivers) <= 3)
+                # content accuracy against raw inputs
+                for item in drivers + held:
+                    m = re.fullmatch(r'overdue by (\d+) days?', item)
+                    if m: self.assertEqual(int(m.group(1)), -int(x.days_until_deadline)); self.assertEqual(x.urgency, 100)
+                    m = re.fullmatch(r'due in (\d+) days?', item)
+                    if m: self.assertEqual(int(m.group(1)), int(x.days_until_deadline))
+                    if item == 'due today': self.assertEqual(x.days_until_deadline, 0)
+                    if item == 'no deadline': self.assertTrue(pd.isna(x.days_until_deadline))
+                    if item.endswith(' importance'): self.assertEqual(item.split()[0], x.importance_label)
+                    if item.endswith('goal contribution'): self.assertEqual(item.split()[0], x.goal_label)
+                    if item.endswith('consequence if delayed'): self.assertIn(item.split()[0], {x.consequence_label, 'No'} if x.consequence_label in ('None', 'No consequence') else {x.consequence_label})
+                    if item == 'fits the longest free slot': self.assertEqual(x.feasibility, 100)
+                    if item == 'partial progress possible in the free slot': self.assertTrue(60 <= x.feasibility < 100 and x.startable_now)
+                    if item == 'does not fit the free slot': self.assertTrue(x.feasibility <= 40 and not x.startable_now)
+                    if item == 'matches preferred time of day': self.assertEqual(x.preferred_time, 'Afternoon')
+                    if item == 'Anytime task': self.assertEqual(x.preferred_time, 'Anytime')
+                    m = re.fullmatch(r'preferred time \((\w+)\) differs from now', item)
+                    if m: self.assertEqual(m.group(1), x.preferred_time); self.assertNotIn(x.preferred_time, ('Afternoon', 'Anytime'))
+                    m = re.fullmatch(r'energy/focus fit (\d+)/100', item)
+                    if m: self.assertEqual(int(m.group(1)), round(x.energy_suitability))
+
+
+class TestUnusualScenarios(unittest.TestCase):
+    def test_factor_scores_and_model_score_always_in_range(self):
+        rng = np.random.RandomState(1); tasks = []
+        for i in range(2000):
+            spl = bool(rng.rand() < .5); d = float(rng.choice([1, 5, 15, 30, 60, 240, 1e6]))
+            tasks.append(task(f'R{i}', due_date=rng.choice([None, '1990-01-01', '2026-11-01', '2026-11-16', '2026-11-17', '2026-11-30', '2100-01-01']),
+                              importance=rng.choice(list(wf.IMPORTANCE_MAP)), goal_contribution=rng.choice(list(wf.GOAL_MAP)),
+                              consequence_of_delay=rng.choice(list(wf.CONSEQUENCE_MAP)), complexity=rng.choice(COMPLEX),
+                              preferred_time=rng.choice(PERIODS + ['Anytime']), estimated_duration_minutes=d,
+                              minimum_session_minutes=min(d, float(rng.choice([1, 5, 15, 45]))) if spl else d, is_splittable=spl))
+        for e, f, p in itertools.product(LEVELS, LEVELS, PERIODS):
+            for A, L in [(0, 0), (10, 10), (45, 20), (120, 120)]:
+                r, _ = rank(tasks[:150], available_time_minutes=A, longest_free_slot_minutes=L, energy_level=e, focus_level=f, current_time_period=p)
+                F = r[wf.FEATURES]
+                self.assertTrue(np.isfinite(F.to_numpy()).all()); self.assertTrue(((F >= 0) & (F <= 100)).all().all())
+                self.assertTrue(((r.ml_score >= 0) & (r.ml_score <= 100)).all())
+
+    def test_single_task(self):
+        r, e = rank([task('ONLY')]); self.assertEqual((len(r), len(e), int(r.iloc[0]['rank'])), (1, 0, 1)); self.assertEqual(r.iloc[0].category, 'Do now')
+
+    def test_large_batch_performance_and_ranks(self):
+        tasks = [task(f'T{i:04d}', importance=['Low', 'Medium', 'High', 'Critical'][i % 4], due_date=f'2026-11-{17 + i % 12}') for i in range(1000)]
+        t0 = time.perf_counter(); r, _ = rank(tasks); dt = time.perf_counter() - t0
+        self.assertLess(dt, 20); self.assertEqual(list(r['rank']), list(range(1, 1001)))
+        self.assertEqual((r.category == 'Do now').sum(), 1); self.assertEqual((r.category == 'Do next').sum(), 2)
+        self.assertTrue(r.ml_score.is_monotonic_decreasing or (r.ml_score.round(6).diff().dropna() <= 0).all())
+
+    def test_all_identical_tasks_deterministic(self):
+        t = [task(f'T{i}') for i in (3, 1, 2)]; r, _ = rank(t); self.assertEqual(list(r.task_id), ['T1', 'T2', 'T3'])
+
+    def test_date_boundaries(self):
+        cases = {'2026-11-16 23:59:59': (0, 'due today'), '2026-11-15 23:59:59': (-1, 'overdue by 1 day'), '2026-11-17 00:00:00': (1, 'due in 1 day'), '2028-02-29': (470, 'due in 470 days')}
+        for due, (days, text) in cases.items():
+            r, _ = rank([task('A', due_date=due)])
+            with self.subTest(due=due):
+                self.assertEqual(r.iloc[0].days_until_deadline, days); self.assertEqual(wf._urgency_text(days), text)
+        r, _ = rank([task('A', due_date='1990-01-01'), task('B', due_date='2100-01-01')])
+        u = r.set_index('task_id').urgency; self.assertEqual((u['A'], u['B']), (100, 15))
+        r, _ = rank([task('A')], session_timestamp='2026-11-16 00:00:00'); self.assertEqual(len(r), 1)
+        r, e = rank([task('A', start_date='2026-11-16 18:00:00')], session_timestamp='2026-11-16 08:00:00'); self.assertEqual(e.exclusion_reason.tolist(), ['Start date in future'])
+        r, e = rank([task('A', start_date='2026-11-16 08:30:00')], session_timestamp='2026-11-16 10:00:00'); self.assertEqual((len(r), len(e)), (1, 0))   # already started today
+        r, e = rank([task('A', start_date='2026-11-16')], session_timestamp='2026-11-16 00:00:00'); self.assertEqual((len(r), len(e)), (1, 0))      # date-only start = from midnight
+
+    def test_numeric_formats(self):
+        r, _ = rank([task('A', estimated_duration_minutes=30.5, minimum_session_minutes=30.5), task('B', estimated_duration_minutes='30', minimum_session_minutes='30')])
+        self.assertEqual(len(r), 2)
+        r, _ = rank([task('A', estimated_duration_minutes=1e6, minimum_session_minutes=1e6)]); self.assertFalse(bool(r.iloc[0].startable_now)); self.assertTrue(0 <= r.iloc[0].feasibility <= 100)
+        for bad in (float('inf'), True, [30]): 
+            with self.assertRaises(ValidationError): rank([task('A', estimated_duration_minutes=bad)])
+
+    def test_extra_fields_and_unicode_names(self):
+        r, _ = rank([task('A', task_name='Café ☕ — révision', extra_field='x')], unknown_session_key=1)
+        self.assertEqual(len(r), 1); self.assertIn('Café', r.iloc[0].task_name)
+        r, _ = rank([task('A', task_name=None)]); self.assertEqual(len(r), 1)
+
+    def test_integer_and_uuid_style_ids(self):
+        r, _ = rank([task(1), task(2)]); self.assertEqual(list(r.task_id), [1, 2])
+        r, _ = rank([task('c0a8-01'), task('c0a8-02')]); self.assertEqual(len(r), 2)
+
+    def test_empty_and_all_excluded_share_schema(self):
+        r0, e0 = wf.rank_tasks([], sess(), MODEL)
+        r1, e1 = rank([task('A', status='Completed')])
+        self.assertEqual(list(r0.columns), list(r1.columns)); self.assertEqual(list(e0.columns), ['task_id', 'exclusion_reason']); self.assertEqual(len(e1), 1)
+
+    def test_only_blocked_future_and_done_tasks(self):
+        r, e = rank([task('A', status='Completed'), task('B', dependency_status='Blocked'), task('C', start_date='2027-01-01'), task('D', status='Cancelled')])
+        self.assertEqual((len(r), len(e)), (0, 4))
+
+    def test_no_startable_and_zero_time_have_reasons_and_valid_categories(self):
+        r, _ = rank([task(f'T{i}') for i in range(4)], available_time_minutes=0, longest_free_slot_minutes=0)
+        self.assertTrue((r.category == 'Schedule later').all()); self.assertTrue(r.reason.str.contains('does not fit the free slot').all())
+
+    def test_session_input_not_mutated(self):
+        s = sess(); import copy; before = copy.deepcopy(s); wf.rank_tasks(pd.DataFrame([task('A')]), s, MODEL); self.assertEqual(s, before)
+
+
+FIX = json.loads((ROOT / 'tests' / 'fixtures' / 'tie_category_sessions.json').read_text())
+
+
+def _load_original():
+    spec = importlib.util.spec_from_file_location('wf_user_v1', ROOT / 'backup' / 'user_v1' / 'worktodo_features.py')
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
+
+
+class TestTieBreakIsNotARegression(unittest.TestCase):
+    """Deterministic tie-breaking may change WHICH of two exactly-tied startable tasks gets a category at a boundary
+    (Do now/Do next/Schedule later). Eligibility, feasibility, startability and scores must be unchanged.
+    Real dataset fixtures: S00701 (positions 3/4) and S02652 (positions 1/2)."""
+
+    @classmethod
+    def setUpClass(cls): cls.old = _load_original()
+
+    def _both(self, fx):
+        tasks = pd.DataFrame(fx['tasks']); se = fx['session']
+        ro, eo = self.old.rank_tasks(tasks, se, MODEL); rn, en = wf.rank_tasks(tasks, se, MODEL)
+        return ro.set_index('task_id'), eo, rn.set_index('task_id'), en
+
+    def test_nothing_but_tied_ordering_changes(self):
+        for fx in FIX:
+            with self.subTest(session=fx['session_id']):
+                a, eo, b, en = self._both(fx); b = b.loc[a.index]
+                self.assertEqual(sorted(eo.task_id), sorted(en.task_id))                       # eligibility identical
+                np.testing.assert_allclose(a.feasibility, b.feasibility); np.testing.assert_allclose(a.ml_score, b.ml_score, atol=1e-9)
+                self.assertTrue((a.startable_now == b.startable_now).all())                    # startability identical
+                self.assertEqual(a.category.value_counts().to_dict(), b.category.value_counts().to_dict())   # same category counts
+
+    def test_changed_tasks_are_an_exactly_tied_startable_pair_at_a_boundary(self):
+        for fx in FIX:
+            with self.subTest(session=fx['session_id']):
+                a, _, b, _ = self._both(fx); b = b.loc[a.index]
+                changed = list(a.index[a.category != b.category]); self.assertEqual(sorted(changed), sorted(fx['changed'])); self.assertEqual(len(changed), 2)
+                x, y = changed
+                self.assertLess(abs(a.ml_score[x] - a.ml_score[y]), 1e-6)                      # exact tie (differs only by float noise)
+                self.assertTrue(a.startable_now[x] and a.startable_now[y])                      # both startable in old AND new
+                hi, lo = (x, y) if a.urgency[x] > a.urgency[y] else (y, x)
+                self.assertEqual(b['rank'][hi] + 1, b['rank'][lo])                              # new order: more urgent first
+                self.assertEqual(b.category[hi], a.category[[x, y]].sort_values(key=lambda s: s.map({'Do now': 0, 'Do next': 1, 'Schedule later': 2})).iloc[0])
+
+    def test_new_ordering_independent_of_input_order(self):
+        for fx in FIX:
+            tasks = pd.DataFrame(fx['tasks']); base, _ = wf.rank_tasks(tasks, fx['session'], MODEL)
+            for seed in range(5):
+                shuffled = tasks.sample(frac=1, random_state=seed)
+                r, _ = wf.rank_tasks(shuffled, fx['session'], MODEL)
+                self.assertEqual(list(r.task_id), list(base.task_id)); self.assertEqual(list(r.category), list(base.category))
+
+    def test_boundary_tie_synthetic(self):
+        """Two exactly tied startable tasks, n_now=1: the more urgent one gets Do now regardless of input order."""
+        for order in (['URG', 'LAZY'], ['LAZY', 'URG']):
+            ts = {'URG': task('URG', due_date='2026-11-16'), 'LAZY': task('LAZY', due_date='2026-12-30')}
+            r, _ = rank([ts[i] for i in order], StubModel([50.0, 50.0 + 4e-14]) if order[0] == 'URG' else StubModel([50.0 + 4e-14, 50.0]))
+            self.assertEqual(r.set_index('task_id').category.to_dict(), {'URG': 'Do now', 'LAZY': 'Do next'})
+
+
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

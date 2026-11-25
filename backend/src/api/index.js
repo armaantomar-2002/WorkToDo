@@ -1,0 +1,58 @@
+'use strict';
+const express = require('express');
+const { csrfGuard } = require('../http/security');
+const { requireAuth } = require('../auth/requireAuth');
+const { createEmailProvider } = require('../email/provider');
+const { createAuthService } = require('../modules/auth/auth.service');
+const { authRouter } = require('../modules/auth/auth.routes');
+const { createUsersService } = require('../modules/users/users.service');
+const { usersRouter } = require('../modules/users/users.routes');
+const { createTasksService } = require('../modules/tasks/tasks.service');
+const { tasksRouter } = require('../modules/tasks/tasks.routes');
+const { createDependenciesService } = require('../modules/tasks/dependencies');
+const { createTimerService } = require('../modules/timer/timer.service');
+const { timerRouter } = require('../modules/timer/timer.routes');
+const { createFeedbackService } = require('../modules/recommendations/feedback.service');
+const { createSessionsService } = require('../modules/sessions/sessions.service');
+const { sessionsRouter } = require('../modules/sessions/sessions.routes');
+const { createRunsService } = require('../modules/recommendations/runs.service');
+const { runsRouter } = require('../modules/recommendations/runs.routes');
+const { createDashboardService } = require('../modules/dashboard/dashboard.service');
+const { dashboardRouter } = require('../modules/dashboard/dashboard.routes');
+const { createAppointmentsService } = require('../modules/planner/appointments.service');
+const { appointmentsRouter, unavailableRouter } = require('../modules/planner/appointments.routes');
+const { createScheduleService } = require('../modules/planner/schedule.service');
+const { scheduleRouter } = require('../modules/planner/schedule.routes');
+const { createPostponeService } = require('../modules/planner/postpone.service');
+const { createCalendarService } = require('../modules/planner/calendar.service');
+const { createPlannerSummary } = require('../modules/planner/summary');
+const { postponeRouter, calendarRouter } = require('../modules/planner/planner.routes');
+const { createInsightsService } = require('../modules/insights/insights.service');
+const { insightsRouter } = require('../modules/insights/insights.routes');
+
+/** All database-backed routes (mounted at /api/v1 only when a Prisma client is supplied to createApp). */
+function createDbRouter({ prisma, config, recommendationService, emailProvider = createEmailProvider(config), now }) {
+  const authenticate = requireAuth({ prisma, config });
+  const usersService = createUsersService({ prisma });
+  const router = express.Router();
+  router.use(csrfGuard(config.cors.allowedOrigins));
+  router.use('/auth', authRouter({ service: createAuthService({ prisma, config, emailProvider, now }), usersService, config, authenticate }));
+  router.use('/users', usersRouter({ service: usersService, authenticate }));
+  const runsService = createRunsService({ prisma, recommendationService });
+  const scheduleService = createScheduleService({ prisma, runsService, now });
+  const calendarService = createCalendarService({ prisma, now });
+  const appointmentsService = createAppointmentsService({ prisma });
+  router.use('/tasks', postponeRouter({ service: createPostponeService({ prisma, now }), authenticate }));
+  router.use('/appointments', appointmentsRouter({ service: appointmentsService, authenticate }));
+  router.use('/unavailable-periods', unavailableRouter({ service: appointmentsService, authenticate }));
+  router.use('/schedules', scheduleRouter({ service: scheduleService, authenticate }));
+  router.use('/calendar', calendarRouter({ service: calendarService, authenticate }));
+  router.use('/tasks', tasksRouter({ service: createTasksService({ prisma, now }), dependencies: createDependenciesService({ prisma }), authenticate }));
+  router.use('/sessions', sessionsRouter({ service: createSessionsService({ prisma }), authenticate }));
+  router.use('/focus-timers', timerRouter({ service: createTimerService({ prisma, now }), authenticate }));
+  router.use('/recommendations', runsRouter({ service: runsService, feedback: createFeedbackService({ prisma }), authenticate }));
+  router.use('/dashboard', dashboardRouter({ service: createDashboardService({ prisma, now, plannerSummary: createPlannerSummary({ calendar: calendarService, schedule: scheduleService, prisma, now }) }), authenticate }));
+  router.use('/insights', insightsRouter({ service: createInsightsService({ prisma, now }), authenticate }));
+  return router;
+}
+module.exports = { createDbRouter };

@@ -1,0 +1,36 @@
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.env
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+!.env.template
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.template
+
+# Dependencies and caches
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage/
+dist/
+build/
+
+# Local database and logs
+*.log
+
+# Old transfer copy
+WorkToDo-Transfer/
+
+gitignore_riginal_backup

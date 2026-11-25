@@ -1,0 +1,180 @@
+{
+ "name": "zero-time",
+ "provenance": "pythonResponse produced by the real worktodo_service engine (service layer); camelCase files converted independently",
+ "publicRequest": {
+  "session": {
+   "localTime": "2026-11-16 10:00:00",
+   "availableTimeMinutes": 0,
+   "longestFreeSlotMinutes": 0,
+   "currentTimePeriod": "Morning",
+   "energyLevel": "Medium",
+   "focusLevel": "High"
+  },
+  "tasks": [
+   {
+    "taskId": "Z1",
+    "taskName": "task Z1",
+    "startDate": "2026-11-01",
+    "dueDate": "2026-11-20",
+    "importance": "High",
+    "goalContribution": "High",
+    "consequenceOfDelay": "Major",
+    "complexity": "Simple",
+    "estimatedDurationMinutes": 30,
+    "minimumSessionMinutes": 30,
+    "isSplittable": false,
+    "preferredTime": "Anytime",
+    "dependencyStatus": "No dependency",
+    "status": "Pending"
+   },
+   {
+    "taskId": "Z2",
+    "taskName": "task Z2",
+    "startDate": "2026-11-01",
+    "dueDate": null,
+    "importance": "Low",
+    "goalContribution": "High",
+    "consequenceOfDelay": "Major",
+    "complexity": "Simple",
+    "estimatedDurationMinutes": 30,
+    "minimumSessionMinutes": 30,
+    "isSplittable": false,
+    "preferredTime": "Anytime",
+    "dependencyStatus": "No dependency",
+    "status": "Pending"
+   }
+  ]
+ },
+ "pythonRequest": {
+  "session": {
+   "session_timestamp": "2026-11-16 10:00:00",
+   "available_time_minutes": 0,
+   "longest_free_slot_minutes": 0,
+   "current_time_period": "Morning",
+   "energy_level": "Medium",
+   "focus_level": "High"
+  },
+  "tasks": [
+   {
+    "task_id": "Z1",
+    "task_name": "task Z1",
+    "start_date": "2026-11-01",
+    "due_date": "2026-11-20",
+    "importance": "High",
+    "goal_contribution": "High",
+    "consequence_of_delay": "Major",
+    "complexity": "Simple",
+    "estimated_duration_minutes": 30,
+    "minimum_session_minutes": 30,
+    "is_splittable": false,
+    "preferred_time": "Anytime",
+    "dependency_status": "No dependency",
+    "status": "Pending"
+   },
+   {
+    "task_id": "Z2",
+    "task_name": "task Z2",
+    "start_date": "2026-11-01",
+    "due_date": null,
+    "importance": "Low",
+    "goal_contribution": "High",
+    "consequence_of_delay": "Major",
+    "complexity": "Simple",
+    "estimated_duration_minutes": 30,
+    "minimum_session_minutes": 30,
+    "is_splittable": false,
+    "preferred_time": "Anytime",
+    "dependency_status": "No dependency",
+    "status": "Pending"
+   }
+  ]
+ },
+ "pythonResponse": {
+  "ranked": [
+   {
+    "rank": 1,
+    "task_id": "Z1",
+    "task_name": "task Z1",
+    "ml_score": 58.854166666666664,
+    "category": "Schedule later",
+    "startable_now": false,
+    "reason": "Drivers: High importance; due in 4 days; High goal contribution. Held back by: does not fit the free slot; energy/focus fit 62/100.",
+    "urgency": 50.0,
+    "importance": 80.0,
+    "goal_contribution": 75.0,
+    "feasibility": 0.0,
+    "consequence_of_delay": 100.0,
+    "timing_suitability": 70.0,
+    "energy_suitability": 62.08333333333333
+   },
+   {
+    "rank": 2,
+    "task_id": "Z2",
+    "task_name": "task Z2",
+    "ml_score": 34.85416666666667,
+    "category": "Schedule later",
+    "startable_now": false,
+    "reason": "Drivers: High goal contribution; Major consequence if delayed; Anytime task. Held back by: no deadline; Low importance; does not fit the free slot; energy/focus fit 62/100.",
+    "urgency": 10.0,
+    "importance": 20.0,
+    "goal_contribution": 75.0,
+    "feasibility": 0.0,
+    "consequence_of_delay": 100.0,
+    "timing_suitability": 70.0,
+    "energy_suitability": 62.08333333333333
+   }
+  ],
+  "excluded": [],
+  "summary": {
+   "total_tasks": 2,
+   "eligible": 2,
+   "excluded": 0,
+   "returned": 2,
+   "startable_now": 0
+  }
+ },
+ "publicResponse": {
+  "ranked": [
+   {
+    "rank": 1,
+    "taskId": "Z1",
+    "taskName": "task Z1",
+    "mlScore": 58.854166666666664,
+    "category": "Schedule later",
+    "startableNow": false,
+    "reason": "Drivers: High importance; due in 4 days; High goal contribution. Held back by: does not fit the free slot; energy/focus fit 62/100.",
+    "urgency": 50.0,
+    "importance": 80.0,
+    "goalContribution": 75.0,
+    "feasibility": 0.0,
+    "consequenceOfDelay": 100.0,
+    "timingSuitability": 70.0,
+    "energySuitability": 62.08333333333333
+   },
+   {
+    "rank": 2,
+    "taskId": "Z2",
+    "taskName": "task Z2",
+    "mlScore": 34.85416666666667,
+    "category": "Schedule later",
+    "startableNow": false,
+    "reason": "Drivers: High goal contribution; Major consequence if delayed; Anytime task. Held back by: no deadline; Low importance; does not fit the free slot; energy/focus fit 62/100.",
+    "urgency": 10.0,
+    "importance": 20.0,
+    "goalContribution": 75.0,
+    "feasibility": 0.0,
+    "consequenceOfDelay": 100.0,
+    "timingSuitability": 70.0,
+    "energySuitability": 62.08333333333333
+   }
+  ],
+  "excluded": [],
+  "summary": {
+   "totalTasks": 2,
+   "eligible": 2,
+   "excluded": 0,
+   "returned": 2,
+   "startableNow": 0
+  }
+ }
+}

@@ -1,0 +1,60 @@
+{
+ "session": {
+  "session_timestamp": "2026-11-16 10:00:00",
+  "available_time_minutes": 120,
+  "longest_free_slot_minutes": 120,
+  "current_time_period": "Morning",
+  "energy_level": "Medium",
+  "focus_level": "High"
+ },
+ "tasks": [
+  {
+   "task_id": "T1",
+   "task_name": "Write report",
+   "start_date": "2026-11-01",
+   "due_date": "2026-11-17",
+   "importance": "Critical",
+   "goal_contribution": "High",
+   "consequence_of_delay": "Major",
+   "complexity": "Simple",
+   "estimated_duration_minutes": 30,
+   "minimum_session_minutes": 30,
+   "is_splittable": false,
+   "preferred_time": "Anytime",
+   "dependency_status": "No dependency",
+   "status": "Pending"
+  },
+  {
+   "task_id": "T2",
+   "task_name": "Gym session",
+   "start_date": "2026-11-01",
+   "due_date": null,
+   "importance": "Low",
+   "goal_contribution": "High",
+   "consequence_of_delay": "Major",
+   "complexity": "Simple",
+   "estimated_duration_minutes": 30,
+   "minimum_session_minutes": 30,
+   "is_splittable": false,
+   "preferred_time": "Evening",
+   "dependency_status": "No dependency",
+   "status": "Pending"
+  },
+  {
+   "task_id": "T3",
+   "task_name": "Old task",
+   "start_date": "2026-11-01",
+   "due_date": "2026-11-20",
+   "importance": "High",
+   "goal_contribution": "High",
+   "consequence_of_delay": "Major",
+   "complexity": "Simple",
+   "estimated_duration_minutes": 30,
+   "minimum_session_minutes": 30,
+   "is_splittable": false,
+   "preferred_time": "Anytime",
+   "dependency_status": "No dependency",
+   "status": "Completed"
+  }
+ ]
+}

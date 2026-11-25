@@ -1,0 +1,9 @@
+# Runtime. ML libraries pinned to the versions recorded in artifacts/worktodo_training_config.json (Python >= 3.11 for pandas 3.x).
+fastapi>=0.110,<1.0
+pydantic>=2.5,<3
+uvicorn>=0.27,<1.0
+scikit-learn==1.9.1
+pandas==3.0.6
+numpy==2.5.4
+scipy==1.18.1
+joblib>=1.4
