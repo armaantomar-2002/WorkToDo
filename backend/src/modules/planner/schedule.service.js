@@ -23,7 +23,7 @@ const engineBlock = (b) => ({ id: b.id, kind: b.kind, taskId: b.taskId ?? undefi
 function createScheduleService({ prisma, runsService, now = () => new Date() }) {
   const versionOut = (v) => ({
     id: v.id, versionNumber: v.versionNumber, status: v.status, revision: v.revision, mode: v.mode, orderSource: v.orderSource, horizon: { from: formatDateOnly(v.horizonFrom), to: formatDateOnly(v.horizonTo) },
-    generatedAt: toWall(v.generatedAtLocal), createdAt: toIso(v.createdAt), approvedAt: toIso(v.approvedAt), rejectedAt: toIso(v.rejectedAt), supersededAt: toIso(v.supersededAt), basedOnId: v.basedOnId ?? null,
+    generatedAt: toWall(v.generatedAtLocal), createdAt: toIso(v.createdAt), approvedAt: toIso(v.approvedAt), rejectedAt: toIso(v.rejectedAt), supersededAt: toIso(v.supersededAt), basedOnId: v.basedOnId ?? null, recommendationRunId: v.recommendationRunId ?? null,
   });
 
   const ownedVersion = async (db, userId, id) => { const v = await db.scheduleVersion.findFirst({ where: { id, userId } }); if (!v) throw notFound(); return v; };
@@ -71,12 +71,12 @@ function createScheduleService({ prisma, runsService, now = () => new Date() }) 
     return { result, blocks: all };
   }
 
-  const mlSession = (ctx) => {
+  const mlSession = (ctx, over = {}) => {
     const today = ctx.nowLocal.slice(0, 10);
     const free = subtractIntervals(workingWindowsFor(ctx, today), occupied(ctx)).map((f) => ({ s: Math.max(f.start, toAbs(ctx.nowLocal)), e: f.end })).filter((f) => f.e > f.s);
     const total = free.reduce((s, f) => s + (f.e - f.s), 0); const longest = free.reduce((m, f) => Math.max(m, f.e - f.s), 0);
     return { localTime: `${ctx.nowLocal.replace('T', ' ')}:00`, availableTimeMinutes: Math.max(1, Math.min(total, 1440)), longestFreeSlotMinutes: Math.min(longest, Math.max(1, Math.min(total, 1440))),
-      currentTimePeriod: periodOfHour(Number(ctx.nowLocal.slice(11, 13))), energyLevel: ctx.prefs.energy, focusLevel: ctx.prefs.focus };
+      currentTimePeriod: periodOfHour(Number(ctx.nowLocal.slice(11, 13))), energyLevel: over.energyLevel ?? ctx.prefs.energy, focusLevel: over.focusLevel ?? ctx.prefs.focus };
   };
 
   async function view(db, userId, v, instant = now()) {
@@ -107,10 +107,32 @@ function createScheduleService({ prisma, runsService, now = () => new Date() }) 
     const busy = [...ctx.appointments.map((a) => spanOf(a)), ...ctx.unavailable.map((u) => ({ start: toAbs(u.startAt), end: toAbs(u.endAt) })), ...considered.map((b) => ({ start: toAbs(b.start), end: toAbs(b.end) }))];
     const windows = []; for (let d = dayOf(toAbs(`${window.from}T00:00`)); d <= dayOf(toAbs(`${window.to}T00:00`)); d++) { const w = dayWindow(ctx, d); if (w) windows.push(w); }
     const freeSlots = subtractIntervals(windows, busy).map((f) => ({ start: fromAbs(Math.max(f.start, nowAbs)), end: fromAbs(f.end) })).filter((f) => toAbs(f.end) > toAbs(f.start)).map((f) => ({ ...f, durationMinutes: toAbs(f.end) - toAbs(f.start) }));
+    // ONE ordered timeline (task sessions, breaks and fixed appointments) -- the Recommendations page and the Planner both render exactly this list.
+    const timeline = buildTimeline({ rows, ctx, window, names, nowAbs, live: v.status === 'approved' });
     return {
-      schedule: versionOut(v), blocks: rows.map((b) => blockOut(b, names)), appointments: ctx.appointments, unavailable: ctx.unavailable, problems, unscheduled, skipped: summary.skipped ?? [],
+      schedule: versionOut(v), timeline, infeasibilities: live ? summary.infeasibilities ?? [] : [], blocks: rows.map((b) => blockOut(b, names)), appointments: ctx.appointments, unavailable: ctx.unavailable, problems, unscheduled, skipped: summary.skipped ?? [],
       stale, needsRecalculation, taskSummaries, freeSlots, workingHours: ctx.prefs.workingHours, timeZone: ctx.prefs.timeZone, now: ctx.nowLocal, notes: { ml: summary.mlNote ?? null },
     };
+  }
+  function buildTimeline({ rows, ctx, window, names, nowAbs, live }) {
+    const prereqsOf = (taskId) => (ctx.tasks.find((t) => t.id === taskId)?.prerequisiteIds ?? []).map((pid) => ctx.tasks.find((t) => t.id === pid)).filter(Boolean).map((p) => ({ taskId: p.id, taskName: p.taskName, status: p.status }));
+    const taskOfAppt = new Map(ctx.tasks.filter((t) => t.appointmentId).map((t) => [t.appointmentId, t]));
+    const items = [];
+    for (const b of rows) {
+      const start = toWall(b.startAt); const end = toWall(b.endAt);
+      if (live && toAbs(end) < nowAbs) continue; // an approved schedule's timeline starts now
+      items.push({ key: `block:${b.id}`, kind: b.kind === 'break' ? 'break' : 'task', blockId: b.id, taskId: b.taskId ?? null, appointmentId: null, title: b.kind === 'task' ? (names.get(b.taskId) ?? b.taskNameSnapshot ?? 'Task') : 'Break',
+        start, end, durationMinutes: Math.round((b.endAt - b.startAt) / 60000), sessionIndex: b.sessionIndex, sessionCount: b.sessionCount, status: b.status, source: b.source, reason: b.reason ?? null, warnings: b.warnings ?? [],
+        prerequisites: b.kind === 'task' ? prereqsOf(b.taskId) : [] });
+    }
+    for (const a of ctx.appointments) {
+      if (a.endAt.slice(0, 10) < window.from || a.startAt.slice(0, 10) > window.to || toAbs(a.endAt) < nowAbs) continue;
+      const t = taskOfAppt.get(a.id);
+      items.push({ key: `appt:${a.id}`, kind: 'fixed', blockId: null, taskId: t?.id ?? null, appointmentId: a.id, title: a.title, start: a.startAt, end: a.endAt, durationMinutes: toAbs(a.endAt) - toAbs(a.startAt), sessionIndex: 1, sessionCount: 1,
+        status: 'fixed', source: 'appointment', reason: 'Fixed commitment — its time is never moved automatically.', warnings: [], prerequisites: t ? prereqsOf(t.id) : [] });
+    }
+    const rank = { fixed: 0, task: 1, break: 2 };
+    return items.sort((x, y) => (x.start < y.start ? -1 : x.start > y.start ? 1 : x.end < y.end ? -1 : x.end > y.end ? 1 : rank[x.kind] - rank[y.kind] || (x.key < y.key ? -1 : 1)));
   }
   const spanOf = (a) => ({ start: toAbs(a.startAt) - (a.preparationBufferMinutes ?? 0) - (a.travelBufferMinutes ?? 0), end: toAbs(a.endAt) + (a.travelBufferMinutes ?? 0) });
   const dayWindow = (ctx, d) => { const wh = ctx.prefs.workingHours; if (!wh.days.includes(((d + 4) % 7 + 7) % 7)) return null; const m = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)); return { start: d * DAY + m(wh.start), end: d * DAY + m(wh.end) }; };
@@ -130,12 +152,12 @@ function createScheduleService({ prisma, runsService, now = () => new Date() }) 
 
   return {
     /** Generates a NEW draft. Never touches the approved schedule. mode: minimal (keep valid future approved blocks), fresh (plan everything), clone (copy approved as-is for manual editing). */
-    async generateDraft(userId, { mode = 'minimal', useMl = true, replace = false } = {}) {
+    async generateDraft(userId, { mode = 'minimal', useMl = true, replace = false, energyLevel, focusLevel } = {}) {
       const instant = now();
       let ranking; let runId = null; let mlNote = null;
       const ctx0 = await loadContext(prisma, userId, instant);
       if (useMl && mode !== 'clone' && runsService && ctx0.tasks.length) {
-        try { const run = await runsService.create(userId, mlSession(ctx0)); ranking = run.ranked.map((r) => ({ taskId: r.taskId, rank: r.rank })); runId = run.run.id; }
+        try { const run = await runsService.create(userId, mlSession(ctx0, { energyLevel, focusLevel })); ranking = run.ranked.map((r) => ({ taskId: r.taskId, rank: r.rank })); runId = run.run.id; }
         catch (e) { mlNote = `The recommendation service was unavailable (${e && e.code ? e.code : 'error'}); tasks were ordered by due date and importance instead.`; }
       } else if (useMl && mode !== 'clone' && !runsService) mlNote = 'Recommendation service not configured; tasks were ordered by due date and importance.';
       try {
@@ -150,7 +172,7 @@ function createScheduleService({ prisma, runsService, now = () => new Date() }) 
           const approved = await tx.scheduleVersion.findFirst({ where: { userId, status: 'approved' } });
           const approvedRows = approved ? await tx.scheduledBlock.findMany({ where: { scheduleVersionId: approved.id, userId } }) : [];
           const kept = mode === 'fresh' ? [] : keepFromApproved(ctx, approvedRows);
-          let blocks; let result = { unscheduled: [], skipped: [], orderSource: 'fallback' };
+          let blocks; let result = { unscheduled: [], skipped: [], infeasibilities: [], orderSource: 'fallback' };
           if (mode === 'clone') { blocks = kept.map((b) => ({ ...b })); renumber(blocks); }
           else { const p = plan(ctx, kept, { ranking: ranking?.length ? ranking : undefined }); blocks = p.blocks; result = p.result; }
           const merged = errorsOf(validateBlocks(ctx, blocks, { errorsOnly: true }));
@@ -159,7 +181,7 @@ function createScheduleService({ prisma, runsService, now = () => new Date() }) 
           const v = await tx.scheduleVersion.create({ data: {
             userId, versionNumber: (last?.versionNumber ?? 0) + 1, status: 'draft', mode, orderSource: ranking?.length ? 'ml' : 'fallback', horizonFrom: dateOnly(ctx.window.from), horizonTo: dateOnly(ctx.window.to),
             generatedAtLocal: fromWall(ctx.nowLocal), inputHash: ctx.hash, basedOnId: approved?.id ?? null, recommendationRunId: runId,
-            summary: { unscheduled: result.unscheduled, skipped: result.skipped, hashParts: ctx.hashParts, mlNote, keptBlocks: kept.length },
+            summary: { unscheduled: result.unscheduled, skipped: result.skipped, infeasibilities: result.infeasibilities ?? [], hashParts: ctx.hashParts, mlNote, keptBlocks: kept.length },
           } });
           await persistBlocks(tx, v, blocks, new Map(ctx.tasks.map((t) => [t.id, t.taskName])));
           return view(tx, userId, v, instant);
@@ -168,6 +190,20 @@ function createScheduleService({ prisma, runsService, now = () => new Date() }) 
         if (e && e.code === 'P2002') throw conflict('concurrent_generation', 'A draft is already being created. Reload and try again.');
         throw e;
       }
+    },
+
+    /**
+     * Called after a task, dependency, appointment, availability or preference change. NEVER approves anything and never moves an appointment:
+     * if the user has an active schedule or a draft whose inputs changed, a fresh DRAFT is generated for review (replacing a stale draft).
+     */
+    async refreshDraftIfNeeded(userId) {
+      const open = await prisma.scheduleVersion.findMany({ where: { userId, status: { in: ['draft', 'approved'] } } });
+      if (!open.length) return null;
+      const ctx = await loadContext(prisma, userId, now());
+      const draft = open.find((v) => v.status === 'draft'); const approved = open.find((v) => v.status === 'approved');
+      const same = (v) => { const parts = (v.summary ?? {}).hashParts ?? {}; return Object.keys(ctx.hashParts).every((k) => parts[k] === ctx.hashParts[k]); };
+      if (draft ? same(draft) : same(approved)) return null; // nothing relevant changed
+      return this.generateDraft(userId, { mode: approved ? 'minimal' : 'fresh', useMl: true, replace: true });
     },
 
     async list(userId) {

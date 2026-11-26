@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { CalendarClock, CheckCircle2, History, Hourglass, Sparkles, Timer, X, Zap } from 'lucide-react';
+import { CheckCircle2, History, Sparkles, Timer, X, Zap } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
-import { Accordion, Alert, Button, Card, CardHeader, CategoryBadge, EmptyState, FormField, Input, Pagination, Select, Skeleton, Spinner } from '../components/ui';
+import { Accordion, Alert, Badge, Button, Card, CardHeader, CategoryBadge, EmptyState, FormField, Pagination, Select, Skeleton, Spinner, useToast } from '../components/ui';
+import { ScheduleTimeline } from '../components/planner/ScheduleTimeline';
 import { FeedbackBar } from '../components/recommendations/FeedbackBar';
-import { useHistory, useRunDetail, useRunRecommendation, useSessions } from '../api/hooks';
+import { useApproveDraft, useGenerateDraft, useHistory, useOpenSchedule, usePreferences, useRejectDraft, useRunDetail, useSessions } from '../api/hooks';
 import { ApiError, messageOf } from '../lib/api';
-import { dueLabel, formatDate, formatDateTime, formatInstant, formatMinutes, fromInputDateTime, nowLocal, periodForHour, todayLocal, toInputDateTime } from '../lib/format';
-import { LEVEL, TIME_PERIOD, type Level, type RankedItem, type RunDetail, type RunInput, type TimePeriod } from '../lib/types';
+import { dueLabel, formatDate, formatDateTime, formatInstant, formatMinutes } from '../lib/format';
+import { dateKeyInZone, safeZone } from '../lib/clock';
+import { LEVEL, type Level, type RankedItem, type RunDetail } from '../lib/types';
 
 const FACTORS: [keyof RankedItem, string][] = [['urgency', 'Urgency'], ['importance', 'Importance'], ['goalContribution', 'Goal contribution'], ['feasibility', 'Feasibility'], ['consequenceOfDelay', 'Consequence of delay'], ['timingSuitability', 'Timing suitability'], ['energySuitability', 'Energy suitability']];
 
@@ -18,7 +20,6 @@ function RankedCard({ item, today, runId }: { item: RankedItem; today: string; r
         <span className="rounded-md bg-olive-soft px-2 py-0.5 text-xs font-bold text-olive-ink" aria-label={`Rank ${item.rank}`}>#{item.rank}</span>
         <h3 className="font-serif text-lg font-semibold">{item.taskName}</h3>
         <CategoryBadge value={item.category} />
-        <span className="ml-auto text-sm font-semibold">Score: {item.mlScore.toFixed(2)}</span>
       </div>
       <p className="mt-1.5 flex flex-wrap items-center gap-x-3 text-xs text-muted">
         <span>{item.dueDate ? `${dueLabel(item.dueDate, today)} (${formatDate(item.dueDate)})` : 'No deadline'}</span>
@@ -28,7 +29,7 @@ function RankedCard({ item, today, runId }: { item: RankedItem; today: string; r
       </p>
       <p className="mt-3 text-sm">{item.reason}</p>
       <details className="mt-3 text-sm">
-        <summary className="cursor-pointer select-none font-medium text-terracotta">Score breakdown</summary>
+        <summary className="cursor-pointer select-none font-medium text-terracotta">Why the model ranked it here (factor breakdown)</summary>
         <dl className="mt-3 grid gap-x-6 gap-y-2.5 sm:grid-cols-2">
           {FACTORS.map(([key, label]) => (
             <div key={key}><div className="flex justify-between text-xs"><dt className="text-muted">{label}</dt><dd className="font-semibold">{(item[key] as number).toFixed(1)}</dd></div>
@@ -43,8 +44,7 @@ function RankedCard({ item, today, runId }: { item: RankedItem; today: string; r
 }
 
 function Results({ detail, past, onBack }: { detail: RunDetail; past: boolean; onBack: () => void }) {
-  const today = todayLocal();
-  const { run, ranked, excluded } = detail;
+  const { run, ranked, excluded } = detail; const today = run.session.localTime.slice(0, 10);
   return (
     <div className="space-y-4">
       {past && <Alert tone="info"><div className="flex flex-wrap items-center justify-between gap-2"><span>Viewing a past run from {formatInstant(run.createdAt)}. Task details are the saved snapshot from that time.</span><Button size="sm" variant="secondary" onClick={onBack}>Back to new run</Button></div></Alert>}
@@ -65,11 +65,14 @@ function Results({ detail, past, onBack }: { detail: RunDetail; past: boolean; o
 }
 
 export default function RecommendationsPage() {
+  const toast = useToast();
   const [params, setParams] = useSearchParams();
+  const prefs = usePreferences();
   const sessions = useSessions(1, 50);
-  const run = useRunRecommendation();
+  const generate = useGenerateDraft(); const approve = useApproveDraft(); const reject = useRejectDraft();
+  const draft = useOpenSchedule('draft'); const active = useOpenSchedule('active');
   const [savedId, setSavedId] = useState(params.get('session') ?? '');
-  const [form, setForm] = useState({ when: toInputDateTime(nowLocal()), available: 120, longest: 120, period: periodForHour(new Date().getHours()) as TimePeriod, energy: 'Medium' as Level, focus: 'Medium' as Level });
+  const [form, setForm] = useState<{ energy: Level | ''; focus: Level | '' }>({ energy: '', focus: '' });
   const [showHistory, setShowHistory] = useState(false);
   const [histPage, setHistPage] = useState(1);
   const [viewId, setViewId] = useState<string | null>(null);
@@ -78,36 +81,37 @@ export default function RecommendationsPage() {
   const saved = sessions.data?.items.find((s) => s.id === savedId);
 
   useEffect(() => { if (savedId && sessions.data && !saved) setSavedId(''); }, [savedId, sessions.data, saved]);
-  const effective = saved
-    ? { when: toInputDateTime(saved.sessionDateTime), available: saved.availableTimeMinutes, longest: saved.longestFreeSlotMinutes, period: saved.currentTimePeriod, energy: saved.energyLevel, focus: saved.focusLevel }
-    : form;
-  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
+  // "How you feel now": the saved session (if chosen) or the form, falling back to the user's defaults. Availability always comes from the calendar.
+  const energy: Level = saved?.energyLevel ?? (form.energy || prefs.data?.defaultEnergyLevel) ?? 'Medium';
+  const focus: Level = saved?.focusLevel ?? (form.focus || prefs.data?.defaultFocusLevel) ?? 'Medium';
   const pickSaved = (id: string) => { setSavedId(id); setParams(id ? { session: id } : {}); };
 
-  const localError = (() => {
-    if (saved) return null;
-    if (!form.when) return 'Choose the session date and time.';
-    if (!Number.isInteger(form.available) || form.available < 1) return 'Available time must be at least 1 minute.';
-    if (!Number.isInteger(form.longest) || form.longest < 0) return 'Longest free slot must be 0 or more minutes.';
-    if (form.longest > form.available) return 'The longest free slot cannot exceed the available time.';
-    return null;
-  })();
-  const [submitted, setSubmitted] = useState(false);
-  const submit = () => {
-    setSubmitted(true);
-    if (localError) return;
+  // ONE schedule: the open draft if there is one, otherwise the active schedule. The Planner reads the very same draft.
+  const view = draft.data ?? active.data ?? null; const isDraft = !!draft.data;
+  const runDetail = useRunDetail(view?.schedule.recommendationRunId ?? null);
+  const zoneToday = dateKeyInZone(new Date(), safeZone(prefs.data?.timeZone));
+  const submit = async () => {
     setViewId(null);
-    const body: RunInput = saved ? { focusSessionId: saved.id } : { localTime: fromInputDateTime(form.when), availableTimeMinutes: form.available, longestFreeSlotMinutes: form.longest, currentTimePeriod: form.period, energyLevel: form.energy, focusLevel: form.focus };
-    run.mutate(body);
+    try {
+      const r = await generate.mutateAsync({ mode: active.data ? 'minimal' : 'fresh', replace: true, energyLevel: energy, focusLevel: focus });
+      toast.success(r.unscheduled.length || r.infeasibilities.length ? 'Schedule draft ready — some tasks need attention. Review it below.' : 'Schedule draft ready. Review it, then approve it in the Planner or here.');
+    } catch (e) { toast.error(messageOf(e)); }
+  };
+  const decide = async (kind: 'approve' | 'reject') => {
+    if (!draft.data) return;
+    try {
+      if (kind === 'approve') { await approve.mutateAsync({ id: draft.data.schedule.id, revision: draft.data.schedule.revision }); toast.success('Schedule approved and now active'); }
+      else { await reject.mutateAsync({ id: draft.data.schedule.id }); toast.success('Draft rejected'); }
+    } catch (e) { toast.error(messageOf(e)); }
   };
 
-  const shown: RunDetail | undefined = viewId ? past.data : run.data;
-  const err = run.error;
-  const errorText = err instanceof ApiError && err.code === 'no_active_tasks' ? <>You have no Pending or In Progress tasks. <Link to="/tasks" className="font-semibold underline">Add or reopen a task</Link> first.</> : err ? messageOf(err) : null;
+  const shownPast: RunDetail | undefined = viewId ? past.data : undefined;
+  const err = generate.error;
+  const hasErrors = !!draft.data?.problems.some((p) => p.severity === 'error');
 
   return (
     <>
-      <PageHeader title="Task Recommendations" subtitle="Get intelligent suggestions on what to do next." actions={<Button variant="secondary" onClick={() => setShowHistory((s) => !s)} aria-expanded={showHistory}><History className="h-4 w-4" aria-hidden="true" />History</Button>} />
+      <PageHeader title="Task Recommendations" subtitle="Get a time-ordered plan: fixed appointments stay put and your tasks are arranged around them." actions={<Button variant="secondary" onClick={() => setShowHistory((s) => !s)} aria-expanded={showHistory}><History className="h-4 w-4" aria-hidden="true" />History</Button>} />
       {showHistory && (
         <Card className="mb-6" aria-label="Recommendation history">
           <CardHeader title="Recommendation History" action={<button type="button" onClick={() => setShowHistory(false)} aria-label="Close history" className="rounded p-1 text-muted hover:text-ink"><X className="h-5 w-5" /></button>} />
@@ -116,42 +120,56 @@ export default function RecommendationsPage() {
             : (<><ul className="divide-y divide-line px-5 pt-2">{history.data.items.map((h) => (
                 <li key={h.id}><button type="button" onClick={() => { setViewId(h.id); setShowHistory(false); window.scrollTo({ top: 0, behavior: 'smooth' }); }} className="flex w-full flex-wrap items-center justify-between gap-2 py-3 text-left text-sm hover:bg-surface-2/60">
                   <span><span className="font-semibold">{formatInstant(h.createdAt)}</span><span className="block text-xs text-muted">{h.session.availableTimeMinutes} min · {h.session.energyLevel} energy · {h.session.focusLevel} focus · {h.summary.returned} ranked / {h.summary.excluded} excluded</span></span>
-                  <span className="text-xs text-muted">{h.topRecommendation ? <>Top: <span className="font-semibold text-ink">{h.topRecommendation.taskName}</span> ({h.topRecommendation.mlScore.toFixed(1)})</> : 'No eligible tasks'}</span></button></li>))}</ul>
+                  <span className="text-xs text-muted">{h.topRecommendation ? <>Top: <span className="font-semibold text-ink">{h.topRecommendation.taskName}</span></> : 'No eligible tasks'}</span></button></li>))}</ul>
               <Pagination page={history.data.page} totalPages={history.data.totalPages} total={history.data.total} onPage={setHistPage} noun="runs" /></>)}
         </Card>)}
 
       <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
         <Card className="self-start">
-          <CardHeader title="Session Context" />
-          <form onSubmit={(e) => { e.preventDefault(); submit(); }} noValidate className="space-y-4 px-5 pb-5 pt-4" aria-label="Session context">
+          <CardHeader title="How you feel now" />
+          <form onSubmit={(e) => { e.preventDefault(); void submit(); }} noValidate className="space-y-4 px-5 pb-5 pt-4" aria-label="Session context">
             <FormField label="Use a saved session" htmlFor="savedSession">
               <Select id="savedSession" value={savedId} onChange={(e) => pickSaved(e.target.value)}>
-                <option value="">Enter context manually</option>
-                {sessions.data?.items.map((s) => <option key={s.id} value={s.id}>{formatDateTime(s.sessionDateTime)} · {s.availableTimeMinutes} min</option>)}
+                <option value="">Use my current energy and focus</option>
+                {sessions.data?.items.map((s) => <option key={s.id} value={s.id}>{formatDateTime(s.sessionDateTime)} · {s.energyLevel} energy · {s.focusLevel} focus</option>)}
               </Select>
             </FormField>
-            <FormField label="Local Date & Time" htmlFor="when"><Input id="when" type="datetime-local" icon={CalendarClock} value={effective.when} disabled={!!saved} onChange={(e) => set('when', e.target.value)} /></FormField>
-            <FormField label="Available Time (minutes)" htmlFor="available"><Input id="available" type="number" min={1} icon={Hourglass} value={Number.isNaN(effective.available) ? '' : effective.available} disabled={!!saved} onChange={(e) => set('available', e.target.valueAsNumber)} /></FormField>
-            <FormField label="Longest Free Slot (minutes)" htmlFor="longest"><Input id="longest" type="number" min={0} icon={Timer} value={Number.isNaN(effective.longest) ? '' : effective.longest} disabled={!!saved} onChange={(e) => set('longest', e.target.valueAsNumber)} /></FormField>
-            <FormField label="Time Period" htmlFor="period"><Select id="period" value={effective.period} disabled={!!saved} onChange={(e) => set('period', e.target.value as TimePeriod)}>{TIME_PERIOD.map((p) => <option key={p}>{p}</option>)}</Select></FormField>
             <div className="grid grid-cols-2 gap-3">
-              <FormField label="Energy Level" htmlFor="energy"><Select id="energy" value={effective.energy} disabled={!!saved} onChange={(e) => set('energy', e.target.value as Level)}>{LEVEL.map((p) => <option key={p}>{p}</option>)}</Select></FormField>
-              <FormField label="Focus Level" htmlFor="focus"><Select id="focus" value={effective.focus} disabled={!!saved} onChange={(e) => set('focus', e.target.value as Level)}>{LEVEL.map((p) => <option key={p}>{p}</option>)}</Select></FormField>
+              <FormField label="Energy Level" htmlFor="energy"><Select id="energy" value={energy} disabled={!!saved} onChange={(e) => setForm((f) => ({ ...f, energy: e.target.value as Level }))}>{LEVEL.map((p) => <option key={p}>{p}</option>)}</Select></FormField>
+              <FormField label="Focus Level" htmlFor="focus"><Select id="focus" value={focus} disabled={!!saved} onChange={(e) => setForm((f) => ({ ...f, focus: e.target.value as Level }))}>{LEVEL.map((p) => <option key={p}>{p}</option>)}</Select></FormField>
             </div>
-            {submitted && localError && <p role="alert" className="text-xs font-medium text-terracotta">{localError}</p>}
-            <Button type="submit" block loading={run.isPending}><Sparkles className="h-4 w-4" aria-hidden="true" />Get Recommendations</Button>
-            <p className="flex items-start gap-1.5 text-xs text-muted"><Zap className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Your own tasks are loaded securely on the server and ranked by the trained model.</span></p>
+            <Button type="submit" block loading={generate.isPending}><Sparkles className="h-4 w-4" aria-hidden="true" />Get Recommendations</Button>
+            <p className="flex items-start gap-1.5 text-xs text-muted"><Zap className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Free time comes from your calendar, appointments and working hours. Your tasks are ranked by the trained model, then arranged around fixed commitments.</span></p>
           </form>
         </Card>
 
         <div className="min-w-0 space-y-4" aria-live="polite">
-          {errorText && !viewId && <Alert tone="error">{errorText}</Alert>}
+          {err && <Alert tone="error">{messageOf(err)}</Alert>}
           {viewId && past.isPending && <Skeleton className="h-64" />}
           {viewId && past.isError && <Alert tone="error">{messageOf(past.error)}</Alert>}
-          {run.isPending && !viewId && <Card><Spinner label="Ranking your tasks" /></Card>}
-          {shown && !(run.isPending && !viewId) && <Results detail={shown} past={!!viewId} onBack={() => setViewId(null)} />}
-          {!shown && !run.isPending && !errorText && !(viewId && past.isPending) && (
-            <Card><EmptyState icon={CheckCircle2} title="Ready when you are" message="Describe your current session on the left and press “Get Recommendations”. Every result is saved to your history." /></Card>)}
+          {shownPast && <Results detail={shownPast} past onBack={() => setViewId(null)} />}
+          {generate.isPending && !viewId && <Card><Spinner label="Building your schedule" /></Card>}
+          {!viewId && !generate.isPending && view && (
+            <>
+              <Card>
+                <CardHeader title={isDraft ? `Schedule draft v${view.schedule.versionNumber}` : `Active schedule v${view.schedule.versionNumber}`}
+                  action={<span className="flex items-center gap-2"><Badge tone={isDraft ? 'amber' : 'olive'}>{isDraft ? 'Draft — not active yet' : 'Active'}</Badge><Link to={`/planner?date=${zoneToday}`} className="text-xs font-semibold text-terracotta hover:underline">Open in Planner</Link></span>} />
+                <div className="space-y-4 px-5 pb-5 pt-3">
+                  {isDraft && view.stale?.isStale && <Alert tone="warning">Your {view.stale.changed.join(', ')} changed after this draft was made. Press “Get Recommendations” to refresh it before approving.</Alert>}
+                  {view.notes.ml && <Alert tone="info">{view.notes.ml}</Alert>}
+                  <ScheduleTimeline view={view} />
+                  {isDraft && (
+                    <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
+                      <Button onClick={() => void decide('approve')} loading={approve.isPending} disabled={!!view.stale?.isStale || hasErrors}>Approve schedule</Button>
+                      <Button variant="secondary" onClick={() => void decide('reject')} loading={reject.isPending}>Reject draft</Button>
+                      <span className="text-xs text-muted">The Planner shows this same draft. Nothing changes until you approve it.</span>
+                    </div>)}
+                </div>
+              </Card>
+              {runDetail.data && <Accordion title="Model ranking details & feedback"><Results detail={runDetail.data} past={false} onBack={() => {}} /></Accordion>}
+            </>)}
+          {!viewId && !generate.isPending && !view && !err && (
+            <Card><EmptyState icon={CheckCircle2} title="Ready when you are" message="Press “Get Recommendations” to get one schedule with exact start and end times. It is saved as a draft you can review here or in the Planner." /></Card>)}
         </div>
       </div>
     </>

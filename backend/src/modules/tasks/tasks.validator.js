@@ -1,5 +1,6 @@
 'use strict';
 const { AppError } = require('../../errors/AppError');
+const { parseLocalDateTime } = require('../../utils/dates');
 const { validateBody, validateQuery, validationError, UUID_RE } = require('../../http/validate');
 const D = require('../../constants/domain');
 
@@ -46,21 +47,44 @@ const withDefaults = (d) => ({
   preferredTime: 'Anytime', status: 'Pending', complexity: 'Moderate', ...d,
 });
 
+// ---- fixed-time tasks: { fixedTime: { startAt, durationMinutes } }. The Appointment created from it is the ONLY holder of the date and times. ----
+const FIXED_SPEC = { startAt: { type: 'datetime', required: true }, durationMinutes: { type: 'int', min: 1, max: 1440, required: true } };
+const wall = (v) => v.replace(' ', 'T').slice(0, 16);
+function fixedTimeInput(raw) {
+  const f = validateBody(raw, FIXED_SPEC);
+  if (!parseLocalDateTime(f.startAt)) throw validationError([{ field: 'fixedTime.startAt', message: 'must be a valid local date and time' }]);
+  return { startAt: wall(f.startAt), durationMinutes: f.durationMinutes };
+}
+/** Splits an optional fixedTime off a request body; for a fixed-time task the appointment duration IS the task duration. */
+function splitFixed(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || !('fixedTime' in body)) return { rest: body, fixedTime: undefined };
+  const { fixedTime, ...rest } = body;
+  if (fixedTime === null) return { rest, fixedTime: null };
+  const f = fixedTimeInput(fixedTime);
+  return { rest: { ...rest, estimatedDurationMinutes: f.durationMinutes, isSplittable: false, minimumSessionMinutes: null }, fixedTime: f };
+}
+
 function createInput(body) {
-  const data = withDefaults(validateBody(body, TASK_SPEC));
+  const { rest, fixedTime } = splitFixed(body);
+  const data = withDefaults(validateBody(rest, TASK_SPEC));
+  if (fixedTime) data.dueDate = fixedTime.startAt.slice(0, 10); // an exact-time commitment is "due" on its own day
   const errors = crossFieldErrors(data);
   if (errors.length) throw validationError(errors);
-  return normalise(data);
+  return { ...normalise(data), ...(fixedTime ? { fixedTime } : {}) };
 }
 
 /** Validates a PATCH body and merges it onto `existing` (a plain object in API shape). Returns only the changed, final values. */
 function updateInput(body, existing) {
-  const patch = validateBody(body, TASK_SPEC, { partial: true });
-  if (Object.keys(patch).length === 0) throw validationError([{ field: 'body', message: 'must contain at least one field to update' }]);
+  const { rest, fixedTime } = splitFixed(body);
+  // a fixed-time task's duration/splitting come from its appointment and are changed only through fixedTime
+  const bodyRest = existing.appointmentId && fixedTime === undefined ? Object.fromEntries(Object.entries(rest ?? {}).filter(([k]) => !['estimatedDurationMinutes', 'isSplittable', 'minimumSessionMinutes'].includes(k))) : rest;
+  const patch = validateBody(bodyRest, TASK_SPEC, { partial: true });
+  if (fixedTime) patch.dueDate = fixedTime.startAt.slice(0, 10);
+  if (Object.keys(patch).length === 0 && fixedTime === undefined) throw validationError([{ field: 'body', message: 'must contain at least one field to update' }]);
   const merged = normalise({ ...existing, ...patch });
   const errors = crossFieldErrors(merged);
   if (errors.length) throw validationError(errors);
-  return { patch: { ...patch, ...(patch.isSplittable === false ? { minimumSessionMinutes: null } : {}) }, merged };
+  return { patch: { ...patch, ...(patch.isSplittable === false ? { minimumSessionMinutes: null } : {}) }, merged, fixedTime };
 }
 
 const dependencyInput = (body) => {

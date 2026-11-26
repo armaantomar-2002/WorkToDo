@@ -4,6 +4,7 @@ import { CalendarPlus, ChevronLeft, ChevronRight, Coffee, RefreshCw, Sparkles } 
 import { PageHeader } from '../components/layout/AppShell';
 import { Alert, Badge, Button, Card, CardHeader, ConfirmDialog, EmptyState, ErrorState, PillTabs, Skeleton, useToast } from '../components/ui';
 import { MonthGrid, TimeGrid } from '../components/planner/CalendarViews';
+import { ScheduleTimeline } from '../components/planner/ScheduleTimeline';
 import { AppointmentModal, type ApptTarget } from '../components/planner/AppointmentModal';
 import { AddBreakDialog, BlockDialog, DayDialog, DiffDialog, ProblemsList } from '../components/planner/PlannerDialogs';
 import { useApproveDraft, useCalendar, useGenerateDraft, useMoveBlock, useOpenSchedule, usePreferences, useRejectDraft, useScheduleList } from '../api/hooks';
@@ -86,6 +87,10 @@ export default function PlannerPage() {
             : <TimeGrid data={cal.data} view={view} anchor={anchor} show={show} canEdit={canEditDraft} onMove={onMove} onBlock={(b, mode) => setBlock({ b, mode })} onAppointment={(x: CalendarAppointment) => setAppt({ mode: 'edit', appt: x })} onEmpty={(_day, start) => setAppt({ mode: 'create', startAt: start })} onOpenDay={setDayInfo} />}
           <p className="mt-2 text-xs text-muted">Times are in {cal.data.timeZone}. {canEditDraft ? 'Drag a session to move it, or select it and use “Move to” (works on touch and keyboard). Every move is checked by the server.' : 'Select a session for details.'} Click an empty slot to add an appointment.</p>
         </>)}
+
+      {(show === 'draft' ? d : a) && (
+        <Card className="mt-6"><CardHeader title={show === 'draft' ? `Schedule order — draft v${d!.schedule.versionNumber}` : `Schedule order — active v${a!.schedule.versionNumber}`} action={<span className="text-xs text-muted">The same list as the Recommendations page</span>} />
+          <div className="px-5 pb-5 pt-3"><ScheduleTimeline view={(show === 'draft' ? d : a)!} showUnscheduled={false} /></div></Card>)}
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         <Card><CardHeader title={`Needs attention${unscheduled.length ? ` (${unscheduled.length})` : ''}`} />

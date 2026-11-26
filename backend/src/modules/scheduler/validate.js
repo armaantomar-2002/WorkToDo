@@ -16,6 +16,7 @@ function validateSchedule(input, opts = {}) {
   const tasks = new Map((input.tasks ?? []).map((t) => [t.id, t]));
   const work = (input.blocks ?? []).map((b) => ({ ...b, s: toAbs(b.start), e: toAbs(b.end), label: `task block ${b.taskId}` }));
   const brk = (input.breaks ?? []).map((b) => ({ ...b, s: toAbs(b.start), e: toAbs(b.end), label: 'break' }));
+  const apptById = new Map((input.appointments ?? []).filter((a) => a.status !== 'cancelled').map((a) => [a.id, { s: toAbs(a.startAt), e: toAbs(a.endAt) }]));
   const fixed = [
     ...(input.appointments ?? []).filter((a) => a.status !== 'cancelled').map(bufferedSpan),
     ...(input.unavailable ?? []).map((u) => ({ s: toAbs(u.startAt), e: toAbs(u.endAt), label: `unavailable period "${u.label ?? ''}"` })),
@@ -59,10 +60,16 @@ function validateSchedule(input, opts = {}) {
     if (t.isSplittable) for (const b of mine) if (b.e - b.s < (t.minimumSessionMinutes ?? 1) && !(mine.length === 1 && total === remaining)) add('error', 'below_minimum_session', `a session of "${t.taskName}" is shorter than its ${t.minimumSessionMinutes}-minute minimum`, id);
     for (const pid of t.prerequisiteIds ?? []) {
       const p = tasks.get(pid); if (!p || !ACTIVE.has(p.status)) continue;
+      if (p.appointmentId && apptById.has(p.appointmentId)) { if (mine.some((x) => x.s < apptById.get(p.appointmentId).e)) add('error', 'dependency_order', `"${t.taskName}" starts before its prerequisite "${p.taskName}" finishes`, id); continue; }
       const pb = (perTask.get(pid) ?? []).map((b) => b.e).concat((input.lockedBlocks ?? []).filter((l) => l.taskId === pid).map((l) => toAbs(l.end)));
       if (!pb.length) add('error', 'prerequisite_not_scheduled', `"${t.taskName}" depends on "${p.taskName}", which is not scheduled`, id);
       else if (mine.some((b) => b.s < Math.max(...pb))) add('error', 'dependency_order', `"${t.taskName}" starts before its prerequisite "${p.taskName}" finishes`, id);
     }
+  }
+  for (const t of tasks.values()) { // prerequisites of a fixed-time task must finish before the commitment starts
+    const ap = t.appointmentId ? apptById.get(t.appointmentId) : null; if (!ap || !ACTIVE.has(t.status)) continue;
+    for (const pid of t.prerequisiteIds ?? []) { const p = tasks.get(pid); if (!p || !ACTIVE.has(p.status)) continue;
+      if ((perTask.get(pid) ?? []).some((b) => b.e > ap.s)) add('error', 'dependency_order', `"${p.taskName}" must finish before "${t.taskName}" starts (${input.appointments.find((x) => x.id === t.appointmentId)?.startAt ?? ''})`, pid); }
   }
   return opts.errorsOnly ? problems.filter((p) => p.severity === 'error') : problems.filter((p) => !(opts.skipLateChecks && p.code === 'after_deadline'));
 }

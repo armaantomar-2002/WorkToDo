@@ -2,7 +2,9 @@
 const { validateBody, validateQuery, validationError } = require('../../http/validate');
 
 const rev = { type: 'int', min: 1, max: 1000000 };
-const generate = (b) => validateBody(b ?? {}, { mode: { type: 'enum', values: ['minimal', 'fresh', 'clone'] }, useMl: { type: 'boolean' }, replace: { type: 'boolean' } });
+const LEVELS = ['Low', 'Medium', 'High'];
+// energyLevel / focusLevel are optional: the Recommendations page sends how the user feels right now; availability is always derived from the calendar.
+const generate = (b) => validateBody(b ?? {}, { mode: { type: 'enum', values: ['minimal', 'fresh', 'clone'] }, useMl: { type: 'boolean' }, replace: { type: 'boolean' }, energyLevel: { type: 'enum', values: LEVELS }, focusLevel: { type: 'enum', values: LEVELS } });
 const move = (b) => {
   const d = validateBody(b, { start: { type: 'datetime', required: true }, end: { type: 'datetime' }, revision: rev, preview: { type: 'boolean' } });
   return { ...d, start: d.start.replace(' ', 'T').slice(0, 16), ...(d.end ? { end: d.end.replace(' ', 'T').slice(0, 16) } : {}) };

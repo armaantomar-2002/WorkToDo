@@ -1,5 +1,10 @@
 'use strict';
 const { formatDateOnly, toIso } = require('../../utils/dates');
+const { toWall } = require('../planner/wall');
+
+/** The appointment is the single source of a fixed-time task's date/time. Cancelled appointments are not exposed as a fixed time. */
+const fixedTimeOf = (t) => (t.appointment && t.appointment.status === 'scheduled'
+  ? { appointmentId: t.appointment.id, startAt: toWall(t.appointment.startAt), endAt: toWall(t.appointment.endAt), durationMinutes: Math.round((t.appointment.endAt - t.appointment.startAt) / 60000) } : null);
 
 const toPublicTask = (t) => ({
   id: t.id, taskName: t.taskName, description: t.description ?? null,
@@ -8,6 +13,7 @@ const toPublicTask = (t) => ({
   estimatedDurationMinutes: t.estimatedDurationMinutes, minimumSessionMinutes: t.minimumSessionMinutes ?? null, isSplittable: t.isSplittable,
   preferredTime: t.preferredTime, dependencyStatus: t.dependencyStatus, status: t.status,
   postponedUntil: formatDateOnly(t.postponedUntil), postponeCount: t.postponeCount ?? 0,
+  appointmentId: fixedTimeOf(t) ? t.appointmentId : null, isFixedTime: !!fixedTimeOf(t), fixedTime: fixedTimeOf(t),
   createdAt: toIso(t.createdAt), updatedAt: toIso(t.updatedAt), completedAt: toIso(t.completedAt),
 });
 

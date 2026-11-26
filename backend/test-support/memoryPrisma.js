@@ -84,6 +84,7 @@ function createMemoryPrisma() {
     const out = { ...row };
     if (inc.pauses) out.pauses = table('focusTimerPause').filter((p) => p.focusTimerId === row.id);
     if (inc.user) out.user = table('user').find((u) => u.id === row.userId);
+    if (inc.appointment && model === 'task') out.appointment = row.appointmentId ? table('appointment').find((x) => x.id === row.appointmentId) ?? null : null;
     if (model === 'recommendationRun') {
       if (inc.items) out.items = order(table('recommendationItem').filter((i) => i.recommendationRunId === row.id && matches('recommendationItem', i, inc.items.where)), inc.items.orderBy).slice(0, inc.items.take ?? Infinity);
       if (inc.exclusions) out.exclusions = table('recommendationExclusion').filter((e) => e.recommendationRunId === row.id);

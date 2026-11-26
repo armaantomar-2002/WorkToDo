@@ -13,10 +13,13 @@ test.describe('focus sessions, recommendations, dashboard, insights, settings', 
     await page.getByLabel('Longest Free Slot (minutes)').fill('999'); await page.getByRole('button', { name: 'Save Session' }).click(); await expect(page.getByText('Cannot exceed the available time')).toBeVisible();
 
     await page.getByRole('button', { name: 'Use this session for recommendations' }).first().click(); await expect(page).toHaveURL(/\/recommendations\?session=/);
-    await expect(page.getByLabel('Available Time (minutes)')).toBeDisabled();
+    await expect(page.getByLabel('Energy Level')).toBeDisabled();
     await page.getByRole('button', { name: 'Get Recommendations' }).click();
-    const items = page.getByTestId('ranked-item'); await expect(items).toHaveCount(2, { timeout: 20_000 });
-    await expect(items.first()).toContainText(/Score: \d+\.\d{2}/); await expect(items.first().getByText(/Do now|Do next|Schedule later/)).toBeVisible();
+    // one schedule draft: every scheduled item shows an exact time interval, not a score
+    const slots = page.getByTestId('timeline-item'); await expect(slots.first()).toBeVisible({ timeout: 20_000 });
+    await expect(slots.first().getByTestId('time-interval')).toContainText(/\d{1,2}:\d{2} (AM|PM) – \d{1,2}:\d{2} (AM|PM)/); await expect(page.getByText(/Score: \d/)).toHaveCount(0);
+    await page.getByText('Model ranking details & feedback').click();
+    const items = page.getByTestId('ranked-item'); await expect(items).toHaveCount(2, { timeout: 20_000 }); await expect(items.first().getByText(/Do now|Do next|Schedule later/)).toBeVisible();
     const firstName = (await items.first().locator('h3').innerText()).trim();
     await expect(page.getByText(/Excluded Tasks \(0\)/)).toBeVisible();
 

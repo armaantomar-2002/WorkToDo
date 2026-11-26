@@ -13,7 +13,7 @@ const PERIODS = { Morning: [300, 720], Afternoon: [720, 1020], Evening: [1020, 1
 const IMPORTANCE_RANK = { Critical: 1, High: 2, Medium: 3, Low: 4 };
 
 const DEFAULTS = Object.freeze({
-  horizonDays: 7, granularityMinutes: 5,
+  horizonDays: 7, granularityMinutes: 1, // 1 = the first session may start at the exact current minute
   workingHours: { start: '09:00', end: '18:00', days: [1, 2, 3, 4, 5] },
   breaks: { enabled: true, minutes: 10, afterContinuousMinutes: 90 },
 });
@@ -66,8 +66,8 @@ function generateSchedule(input) {
   const unavailable = (input.unavailable ?? []).map((u) => ({ start: toAbs(u.startAt), end: toAbs(u.endAt), label: u.label ?? 'Unavailable' }));
   const locked = (input.lockedBlocks ?? []).map((b) => ({ taskId: b.taskId, start: toAbs(b.start), end: toAbs(b.end), kind: b.kind ?? 'task' }));
   const fixedBusy = [...appts, ...unavailable, ...locked];
-  const placed = []; // new work blocks, absolute minutes: { taskId, start, end }
-  const breaks = []; // suggested breaks: { start, end }
+  let placed = []; // new work blocks, absolute minutes: { taskId, start, end }
+  let breaks = []; // suggested breaks: { start, end }
   const busyNow = () => [...fixedBusy, ...placed, ...breaks];
 
   // ---- order: ML ranking when supplied, else fallback; stable and deterministic ----
@@ -76,9 +76,15 @@ function generateSchedule(input) {
   const lockedBy = new Map();
   for (const l of locked) if (l.taskId) lockedBy.set(l.taskId, (lockedBy.get(l.taskId) ?? 0) + (l.end - l.start));
 
-  const skipped = []; const unscheduled = []; const eligible = [];
+  const skipped = []; let unscheduled = []; const eligible = [];
+  // Fixed-time tasks: their Appointment is the immutable time reservation. They are anchors, never placed as flexible work.
+  const apptById = new Map(appts.map((a) => [a.id, a]));
+  const fixedAnchor = new Map(); // taskId -> appointment span
+  for (const t of taskList) if (t.appointmentId && ACTIVE.has(t.status) && apptById.has(t.appointmentId)) fixedAnchor.set(t.id, apptById.get(t.appointmentId));
   for (const t of taskList) {
     if (!ACTIVE.has(t.status)) { skipped.push({ taskId: t.id, code: 'not_active', message: `${t.status} tasks are never scheduled` }); continue; }
+    if (t.appointmentId && !fixedAnchor.has(t.id)) { skipped.push({ taskId: t.id, code: 'fixed_time_outside_horizon', message: 'Fixed-time commitment outside the planning horizon: nothing to schedule yet' }); continue; }
+    if (fixedAnchor.has(t.id)) { skipped.push({ taskId: t.id, code: 'fixed_time', message: 'Fixed-time commitment: its time is reserved and never moved' }); continue; }
     const remaining = t.estimatedDurationMinutes - (t.completedMinutes ?? 0) - (lockedBy.get(t.id) ?? 0);
     if (remaining <= 0) { skipped.push({ taskId: t.id, code: 'no_remaining_work', message: 'Nothing remains to schedule' }); continue; }
     eligible.push({ ...t, remaining, effectiveStart: [t.startDate, t.postponedUntil].filter(Boolean).sort().pop() ?? null });
@@ -89,7 +95,27 @@ function generateSchedule(input) {
   });
   const eligibleIds = new Set(eligible.map((t) => t.id));
 
-  const summary = new Map(); const done = new Set(); const failed = new Map(); const visiting = new Set();
+  let summary = new Map(); let done = new Set(); let failed = new Map(); let visiting = new Set();
+
+  // ---- latest finish: when must each task end so that its dependents / fixed commitments / deadlines still work? ----
+  const dependentsOf = new Map();
+  for (const t of taskList) for (const pid of t.prerequisiteIds ?? []) { if (!dependentsOf.has(pid)) dependentsOf.set(pid, []); dependentsOf.get(pid).push(t); }
+  const fmtAt = (abs) => { const f = fromAbs(abs); return `${f.slice(0, 10)} ${f.slice(11)}`; };
+  const latestMemo = new Map();
+  /** { abs, kind: 'fixed' | 'due', label } | null  -- the tightest limit, propagated backwards through the dependency chain. */
+  function latestOf(id, guard = new Set()) {
+    if (latestMemo.has(id)) return latestMemo.get(id);
+    if (guard.has(id)) return null; guard.add(id);
+    const t = byId.get(id); let best = null; const take = (c) => { if (c && (!best || c.abs < best.abs)) best = c; };
+    if (t && t.dueDate && !fixedAnchor.has(id)) { const dd = dayNumberOf(t.dueDate); if (dd >= cfg.today) take({ abs: (dd + 1) * DAY, rootAbs: (dd + 1) * DAY, kind: 'due', label: `its deadline (${t.dueDate})` }); }
+    for (const d of dependentsOf.get(id) ?? []) {
+      if (!ACTIVE.has(d.status)) continue;
+      if (fixedAnchor.has(d.id)) { const a = fixedAnchor.get(d.id); take({ abs: a.start, rootAbs: a.start, kind: 'fixed', label: `the start of "${a.title}" (${fmtAt(a.coreStart)})`, fixedTitle: a.title, fixedAt: a.coreStart }); continue; }
+      const e = eligible.find((x) => x.id === d.id); if (!e) continue;
+      const l = latestOf(d.id, guard); if (l) take({ ...l, abs: l.abs - e.remaining });
+    }
+    guard.delete(id); latestMemo.set(id, best); return best;
+  }
 
   function contiguousRunBefore(t) { // minutes of flexible work touching `t` from the left
     let run = 0; let edge = t;
@@ -133,7 +159,9 @@ function generateSchedule(input) {
     const lo = Math.max(cfg.now, earliest ?? 0, t.effectiveStart != null ? dayNumberOf(t.effectiveStart) * DAY : 0);
     const dueDay = t.dueDate ? dayNumberOf(t.dueDate) : null;
     const overdue = dueDay != null && dueDay < cfg.today;
-    const hi = (overdue || dueDay == null ? cfg.lastDay : Math.min(dueDay, cfg.lastDay)) * DAY + DAY;
+    let hi = (overdue || dueDay == null ? cfg.lastDay : Math.min(dueDay, cfg.lastDay)) * DAY + DAY;
+    const lim = latestOf(t.id); const fixedCap = lim && lim.kind === 'fixed' && lim.abs < hi ? lim : null;
+    if (fixedCap) hi = fixedCap.abs;
     const startDay = t.effectiveStart ? dayNumberOf(t.effectiveStart) : null;
     if (startDay != null && startDay > cfg.lastDay) return { ok: false, code: 'starts_after_horizon', message: `Starts on ${t.effectiveStart}, after the planning horizon (${dateKeyOf(cfg.lastDay)}).` };
     if (t.isSplittable && t.minimumSessionMinutes > t.remaining && t.remaining > 0 && t.minimumSessionMinutes > t.estimatedDurationMinutes) return { ok: false, code: 'min_session_exceeds_task', message: 'Minimum session is longer than the task.' };
@@ -169,10 +197,10 @@ function generateSchedule(input) {
       rollback();
       const free = subtractIntervals(workingWindows(cfg, dayOf(lo), dayOf(hi - 1)), busyNow()).map((f) => ({ start: Math.max(f.start, lo), end: Math.min(f.end, hi) })).filter((f) => f.end > f.start);
       const total = free.reduce((s, f) => s + (f.end - f.start), 0); const longest = free.reduce((m, f) => Math.max(m, f.end - f.start), 0);
-      const until = overdue || dueDay == null ? `the end of the planning horizon (${dateKeyOf(cfg.lastDay)})` : `its deadline (${t.dueDate})`;
+      const until = fixedCap ? fixedCap.label : overdue || dueDay == null ? `the end of the planning horizon (${dateKeyOf(cfg.lastDay)})` : `its deadline (${t.dueDate})`;
       if (!t.isSplittable && total >= t.remaining) return { ok: false, code: 'no_slot_long_enough', message: `Needs one uninterrupted ${t.remaining}-minute slot (it cannot be split) but the longest free slot before ${until} is ${longest} minutes (${total} minutes free in total).` };
       if (t.isSplittable && total >= t.remaining) return { ok: false, code: 'no_valid_sessions', message: `Free time exists (${total} min) but not in pieces of at least ${t.minimumSessionMinutes ?? 1} minutes.` };
-      return { ok: false, code: dueDay != null && !overdue ? 'no_time_before_deadline' : 'insufficient_time', message: `Needs ${t.remaining} minutes but only ${total} minutes are free before ${until}.` };
+      return { ok: false, code: fixedCap ? 'no_time_before_fixed' : dueDay != null && !overdue ? 'no_time_before_deadline' : 'insufficient_time', message: `Needs ${t.remaining} minutes but only ${total} minutes are free before ${until}.` };
     }
     return { ok: true, sessions, overdue };
   }
@@ -185,6 +213,7 @@ function generateSchedule(input) {
     for (const pid of t.prerequisiteIds ?? []) {
       const p = byId.get(pid);
       if (!p || !ACTIVE.has(p.status)) continue; // completed / cancelled / deleted prerequisite: satisfied
+      if (fixedAnchor.has(pid)) { earliest = Math.max(earliest, fixedAnchor.get(pid).coreEnd); continue; } // a fixed prerequisite is "done" when it ends
       if (eligibleIds.has(pid)) { schedule(eligible.find((x) => x.id === pid), [...stack, t.id]); }
       if (failed.has(pid)) { blocker = { id: pid, name: p.taskName, why: 'could not be scheduled' }; break; }
       const ends = placed.filter((b) => b.taskId === pid).map((b) => b.end).concat(locked.filter((b) => b.taskId === pid).map((b) => b.end));
@@ -201,7 +230,24 @@ function generateSchedule(input) {
     if (!r.ok) { failed.set(t.id, true); unscheduled.push({ taskId: t.id, code: r.code, message: r.message, remainingMinutes: t.remaining }); return; }
     done.add(t.id); summary.set(t.id, r);
   }
-  for (const t of eligible) schedule(t);
+  const NON_RETRY = new Set(['starts_after_horizon', 'min_session_exceeds_task', 'blocked_by_dependency']);
+  function runPass(order) {
+    placed = []; breaks = []; summary = new Map(); done = new Set(); failed = new Map(); visiting = new Set(); unscheduled = [];
+    for (const t of order) schedule(t);
+    return { placed, breaks, summary, unscheduled, lost: unscheduled.reduce((s, u) => s + (u.remainingMinutes ?? 0), 0) };
+  }
+  // Pass 1 follows the ML order. If a deadline-bound task could not be placed, it is promoted ahead of less urgent work and the plan is
+  // re-run (deterministic, at most 6 passes). The pass that leaves the least work unscheduled wins; ties keep the ML order.
+  const promoted = []; const promotedSet = new Set(); let best = null;
+  for (let pass = 0; pass < 6; pass++) {
+    const head = promoted.slice().sort((a, b) => (latestOf(a.id)?.abs ?? Infinity) - (latestOf(b.id)?.abs ?? Infinity));
+    const out = runPass([...head, ...eligible.filter((t) => !promotedSet.has(t.id))]);
+    if (!best || out.lost < best.lost) best = out;
+    const retry = out.unscheduled.filter((u) => !NON_RETRY.has(u.code) && !promotedSet.has(u.taskId));
+    if (!out.lost || !retry.length) break;
+    for (const u of retry) { promotedSet.add(u.taskId); promoted.push(eligible.find((t) => t.id === u.taskId)); }
+  }
+  ({ placed, breaks, summary, unscheduled } = best);
 
   // ---- assemble output ----
   const blocks = []; const warnings = [];
@@ -224,13 +270,39 @@ function generateSchedule(input) {
     return { taskId: t.id, estimatedMinutes: t.estimatedDurationMinutes, completedMinutes: t.completedMinutes ?? 0, lockedScheduledMinutes: lockedBy.get(t.id) ?? 0, remainingMinutes: t.remaining, scheduledMinutes: sched, sessionMinutes: mine.sort((a, b) => a.start - b.start).map((b) => b.end - b.start) };
   });
 
+  // ---- feasibility: required work vs available time before every fixed commitment / deadline (the explanation users see) ----
+  const fmtMin = (m) => { const h = Math.floor(m / 60); const r = m % 60; return h && r ? `${h} h ${r} min` : h ? `${h} hour${h === 1 ? '' : 's'}` : `${r} min`; };
+  const freeBefore = (limit) => subtractIntervals(workingWindows(cfg, dayOf(cfg.now), dayOf(limit - 1)), fixedBusy).map((f) => ({ start: Math.max(f.start, cfg.now), end: Math.min(f.end, limit) })).filter((f) => f.end > f.start).reduce((s, f) => s + f.end - f.start, 0);
+  const limits = new Map(); // key -> { abs, kind, label, fixedTitle, fixedAt }
+  for (const t of eligible) { const l = latestOf(t.id); if (l) limits.set(`${l.kind}|${l.rootAbs}|${l.label}`, l); }
+  const unschedIds = new Set(unscheduled.map((u) => u.taskId)); const infeasibilities = []; const reported = new Set();
+  for (const l of [...limits.values()].sort((a, b) => a.rootAbs - b.rootAbs || (a.label < b.label ? -1 : 1))) {
+    const mine = eligible.filter((t) => { const x = latestOf(t.id); return x && x.rootAbs <= l.rootAbs; });
+    const demand = mine.reduce((s, t) => s + t.remaining, 0); const avail = freeBefore(l.rootAbs); const notPlaced = mine.filter((t) => unschedIds.has(t.id));
+    if (demand <= avail && !notPlaced.length) continue;
+    const sig = mine.map((t) => t.id).sort().join(','); if (reported.has(sig)) continue; reported.add(sig);
+    const short = demand > avail;
+    const what = l.kind === 'fixed' ? `prerequisite work for "${l.fixedTitle}"` : 'work due';
+    const where = l.kind === 'fixed' ? `before "${l.fixedTitle}" starts (${fmtAt(l.fixedAt)})` : `by ${l.label.replace(/^its deadline \(|\)$/g, '')}`;
+    infeasibilities.push({
+      code: l.kind === 'fixed' ? 'infeasible_before_fixed' : 'infeasible_before_deadline', constraint: { kind: l.kind, label: l.label, at: fromAbs(l.kind === 'fixed' ? l.fixedAt : l.rootAbs) },
+      requiredMinutes: demand, availableMinutes: avail, shortfallMinutes: Math.max(0, demand - avail),
+      tasks: mine.map((t) => ({ taskId: t.id, taskName: t.taskName, remainingMinutes: t.remaining, scheduled: !unschedIds.has(t.id) })),
+      message: short ? `Your remaining ${what} requires ${fmtMin(demand)}, but only ${fmtMin(avail)} ${avail === 1 ? 'is' : 'are'} available ${where}. Your current schedule is not feasible.`
+        : `Your remaining ${what} (${fmtMin(demand)}) fits in the ${fmtMin(avail)} available ${where}, but not in the required pieces (continuous sessions, minimum session length or dependency order).`,
+      alternatives: ['Lower the priority of non-critical tasks or move them to another day.', 'Shorten, split or re-estimate the listed tasks.', l.kind === 'fixed' ? `Edit the commitment "${l.fixedTitle}" yourself — it will never be moved automatically.` : 'Move the deadline or postpone the task.', 'Add working time (working hours, working days) or remove an unavailable period.'],
+    });
+  }
+  const fixedTasks = [...fixedAnchor].map(([id, a]) => ({ taskId: id, appointmentId: a.id, start: fromAbs(a.coreStart), end: fromAbs(a.coreEnd),
+    prerequisiteIds: (byId.get(id).prerequisiteIds ?? []).filter((p) => byId.get(p) && ACTIVE.has(byId.get(p).status)) }));
+
   const free = subtractIntervals(workingWindows(cfg, cfg.today, cfg.lastDay), busyNow()).map((f) => ({ start: Math.max(f.start, cfg.now), end: f.end })).filter((f) => f.end > f.start);
   const result = {
     now: fromAbs(cfg.now), horizon: { from: dateKeyOf(cfg.today), to: dateKeyOf(cfg.lastDay) }, orderSource,
     blocks, breaks: breaks.map((b) => ({ kind: 'break', start: fromAbs(b.start), end: fromAbs(b.end), durationMinutes: b.end - b.start, status: 'suggested', reason: `A ${b.end - b.start}-minute break after ${cfg.breaks.afterContinuousMinutes} minutes of continuous work.` })).sort((a, b) => (a.start < b.start ? -1 : 1)),
     appointments: (input.appointments ?? []).filter((a) => a.status !== 'cancelled').map((a) => ({ ...a, kind: 'appointment', fixed: true })),
     freeSlots: free.map((f) => ({ start: fromAbs(f.start), end: fromAbs(f.end), durationMinutes: f.end - f.start })),
-    unscheduled: unscheduled.sort((a, b) => (a.taskId < b.taskId ? -1 : 1)), skipped, tasks: taskSummaries, warnings, explanations: explain,
+    unscheduled: unscheduled.sort((a, b) => (a.taskId < b.taskId ? -1 : 1)), skipped, tasks: taskSummaries, warnings, explanations: explain, infeasibilities, fixedTasks,
   };
   // Self-check: the engine never emits a schedule that its own validator rejects.
   const { validateSchedule } = require('./validate');

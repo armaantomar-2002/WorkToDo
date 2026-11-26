@@ -109,6 +109,9 @@ model Task {
   deletedAt                DateTime?                 @db.Timestamptz(3)
   postponedUntil           DateTime?                 @db.Date
   postponeCount            Int                       @default(0)
+  /// Fixed-time task: the linked Appointment is the ONLY source of its date and start/end time (never duplicated here). NULL = flexible task.
+  appointmentId            String?                   @unique @db.Uuid
+  appointment              Appointment?              @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
   user                     User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
   scheduledBlocks          ScheduledBlock[]
   postponements            TaskPostponement[]
@@ -309,6 +312,7 @@ model Appointment {
   updatedAt                DateTime @updatedAt @db.Timestamptz(3)
   user                     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   history                  AppointmentHistory[]
+  task                     Task?
 
   @@unique([id, userId])
   @@index([userId, status, startAt])

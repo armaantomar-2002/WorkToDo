@@ -17,6 +17,16 @@ export function formatDateTime(local: string | null | undefined): string {
   const [h, mi] = time.split(':').map(Number);
   return `${formatDate(date)}, ${h % 12 === 0 ? 12 : h % 12}:${pad(mi)} ${h < 12 ? 'AM' : 'PM'}`;
 }
+/** "2026-11-26T13:00" -> "1:00 PM" (wall-clock text only: no Date parsing, so no timezone can shift it). */
+export function formatTime(local: string | null | undefined): string {
+  if (!local) return '—';
+  const [h, mi] = local.replace('T', ' ').split(' ')[1].split(':').map(Number);
+  return `${h % 12 === 0 ? 12 : h % 12}:${pad(mi)} ${h < 12 ? 'AM' : 'PM'}`;
+}
+/** "1:00 PM – 3:00 PM"; when the end is on another day (e.g. past midnight) the end carries its date. */
+export function formatTimeRange(start: string, end: string): string {
+  return `${formatTime(start)} – ${formatTime(end)}${start.slice(0, 10) === end.slice(0, 10) ? '' : ` (${formatDate(end.slice(0, 10))})`}`;
+}
 /** ISO instant -> local, human readable (used only for audit timestamps such as "generated at"). */
 export function formatInstant(iso: string | null | undefined): string {
   if (!iso) return '—';

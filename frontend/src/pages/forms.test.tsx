@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../test/utils';
 import { registerSchema } from './RegisterPage';
 import { sessionSchema } from './SessionsPage';
-import { TaskFormModal, taskFormSchema, toTaskInput } from './TaskFormModal';
+import { TaskFormModal, taskFormSchema, toTaskInput, fixedEnd } from './TaskFormModal';
 
 const BASE = { taskName: 'Write report', description: '', startDate: '', dueDate: '', importance: 'High', goalContribution: 'High', consequenceOfDelay: 'Major', estimatedDurationMinutes: 60, isSplittable: false, minimumSessionMinutes: null, preferredTime: 'Anytime', status: 'Pending' } as const;
 const messages = (r: { success: boolean; error?: { issues: { path: (string | number)[]; message: string }[] } }) => (r.success ? [] : r.error!.issues.map((i) => `${i.path.join('.')}: ${i.message}`));
@@ -91,5 +91,27 @@ describe('task form: no Complexity, hours + minutes duration', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Create Task' }));
     await waitFor(() => expect(create).toHaveBeenCalledOnce());
     expect(create.mock.calls[0][0].estimatedDurationMinutes).toBe(120);
+  });
+});
+
+describe('fixed-time tasks in the task form', () => {
+  const FIXED = { ...BASE, isFixedTime: true, fixedDate: '2026-11-26', fixedStart: '13:00', estimatedDurationMinutes: 120 };
+  it('requires date and exact start time; flexible tasks need neither', () => {
+    expect(taskFormSchema.safeParse(FIXED).success).toBe(true);
+    expect(messages(taskFormSchema.safeParse({ ...FIXED, fixedDate: '' }))).toContain('fixedDate: Choose the appointment date');
+    expect(messages(taskFormSchema.safeParse({ ...FIXED, fixedStart: '' }))).toContain('fixedStart: Choose the exact start time');
+    expect(taskFormSchema.safeParse(BASE).success).toBe(true);
+  });
+  it('the end time is calculated from start + duration (13:00 + 2 h = 15:00; across midnight too)', () => {
+    expect(fixedEnd('2026-11-26', '13:00', 120)).toEqual({ date: '2026-11-26', time: '15:00' });
+    expect(fixedEnd('2026-11-26', '23:30', 60)).toEqual({ date: '2026-11-27', time: '00:30' });
+    expect(fixedEnd('', '13:00', 60)).toBeNull();
+  });
+  it('toTaskInput sends fixedTime and never the form-only fields', () => {
+    const out = toTaskInput({ ...FIXED, prerequisiteIds: ['x'] }) as unknown as Record<string, unknown>;
+    expect(out.fixedTime).toEqual({ startAt: '2026-11-26T13:00', durationMinutes: 120 });
+    for (const k of ['isFixedTime', 'fixedDate', 'fixedStart', 'prerequisiteIds']) expect(k in out).toBe(false);
+    expect((toTaskInput({ ...BASE }, true) as unknown as Record<string, unknown>).fixedTime).toBeNull();
+    expect('fixedTime' in (toTaskInput({ ...BASE }) as unknown as Record<string, unknown>)).toBe(false);
   });
 });

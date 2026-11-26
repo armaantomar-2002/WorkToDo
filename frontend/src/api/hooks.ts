@@ -8,7 +8,8 @@ import type {
 } from '../lib/types';
 
 const invalidate = (qc: QueryClient, ...roots: string[]) => Promise.all(roots.map((r) => qc.invalidateQueries({ queryKey: [r] })));
-const taskChanged = (qc: QueryClient) => invalidate(qc, 'tasks', 'dashboard', 'insights', 'dependencies');
+// The server regenerates the schedule DRAFT after any of these changes, so the schedule/calendar queries must be refetched too.
+const taskChanged = (qc: QueryClient) => invalidate(qc, 'tasks', 'dashboard', 'insights', 'dependencies', 'schedule', 'calendar', 'history');
 
 export const useTasks = (filters: TaskFilters) => useQuery({
   queryKey: ['tasks', filters], placeholderData: keepPreviousData,
@@ -35,7 +36,7 @@ export const useInsightsTasks = (range: number) => useQuery({ queryKey: ['insigh
 export const useInsightsSessions = (range: number) => useQuery({ queryKey: ['insights', 'sessions', range], queryFn: () => api.get<InsightsSessions>('/insights/sessions', { range }) });
 
 export const usePreferences = (enabled = true) => useQuery({ queryKey: ['preferences'], enabled, queryFn: () => api.get<{ preferences: Preferences }>('/users/preferences').then((r) => r.preferences) });
-export const useUpdatePreferences = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (p: Partial<Preferences>) => api.patch<{ preferences: Preferences }>('/users/preferences', p).then((r) => r.preferences), onSuccess: (prefs) => { qc.setQueryData(['preferences'], prefs); return invalidate(qc, 'dashboard', 'insights'); } }); };
+export const useUpdatePreferences = () => { const qc = useQueryClient(); return useMutation({ mutationFn: (p: Partial<Preferences>) => api.patch<{ preferences: Preferences }>('/users/preferences', p).then((r) => r.preferences), onSuccess: (prefs) => { qc.setQueryData(['preferences'], prefs); return invalidate(qc, 'dashboard', 'insights', 'schedule', 'calendar'); } }); };
 export const useUpdateProfile = () => useMutation({ mutationFn: (p: { fullName?: string; email?: string; currentPassword?: string }) => api.patch<{ user: User }>('/users/me', p).then((r) => r.user) });
 export const useChangePassword = () => useMutation({ mutationFn: (p: { currentPassword: string; newPassword: string }) => api.post<{ ok: true }>('/auth/change-password', p) });
 export const useAuthSessions = () => useQuery({ queryKey: ['auth-sessions'], queryFn: () => api.get<{ sessions: AuthSessionInfo[] }>('/auth/sessions').then((r) => r.sessions) });
@@ -43,7 +44,7 @@ export const useRevokeAuthSession = () => { const qc = useQueryClient(); return 
 export const useRevokeOtherSessions = () => { const qc = useQueryClient(); return useMutation({ mutationFn: () => api.del<{ revoked: number }>('/auth/sessions'), onSuccess: () => invalidate(qc, 'auth-sessions') }); };
 
 // ---- focus timer (server is the source of truth; the browser only renders)
-const timerChanged = (qc: QueryClient) => invalidate(qc, 'timer', 'timer-history', 'dashboard', 'insights', 'tasks');
+const timerChanged = (qc: QueryClient) => invalidate(qc, 'timer', 'timer-history', 'dashboard', 'insights', 'tasks', 'schedule', 'calendar');
 export const useActiveTimer = () => useQuery({
   queryKey: ['timer', 'active'], refetchOnWindowFocus: true, refetchOnReconnect: true,
   refetchInterval: (q) => (q.state.data ? 30_000 : false), // periodic resync while a timer exists

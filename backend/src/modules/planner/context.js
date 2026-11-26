@@ -40,7 +40,12 @@ async function loadContext(db, userId, instant, window) {
   const prereq = new Map();
   for (const e of edges) { if (!prereq.has(e.taskId)) prereq.set(e.taskId, []); prereq.get(e.taskId).push(e.dependsOnTaskId); }
 
+  // Fixed-time tasks keep their link only while the appointment is still scheduled; a cancelled appointment turns the task back into flexible work.
+  const linkIds = rows.map((t) => t.appointmentId).filter(Boolean);
+  const linked = linkIds.length ? await db.appointment.findMany({ where: { userId, id: { in: linkIds }, status: 'scheduled' } }) : [];
+  const liveLink = new Set(linked.map((a) => a.id));
   const tasks = rows.map((t) => ({
+    appointmentId: t.appointmentId && liveLink.has(t.appointmentId) ? t.appointmentId : null,
     id: t.id, taskName: t.taskName, status: t.status, importance: t.importance, dueDate: formatDateOnly(t.dueDate), startDate: formatDateOnly(t.startDate),
     postponedUntil: formatDateOnly(t.postponedUntil), estimatedDurationMinutes: t.estimatedDurationMinutes, isSplittable: !!t.isSplittable,
     minimumSessionMinutes: t.isSplittable ? t.minimumSessionMinutes ?? 1 : null, preferredTime: t.preferredTime ?? 'Anytime',
@@ -55,7 +60,7 @@ async function loadContext(db, userId, instant, window) {
   const parts = {
     prefs: sha([prefs.workingHours, prefs.breaks, prefs.timeZone]), appointments: sha(apptRows.map((a) => [a.id, a.revision, toWall(a.startAt), toWall(a.endAt)])),
     unavailable: sha(unavailable.map((u) => [u.id, u.startAt, u.endAt])),
-    tasks: sha(tasks.map((t) => [t.id, t.status, t.estimatedDurationMinutes, t.dueDate, t.startDate, t.postponedUntil, t.isSplittable, t.minimumSessionMinutes, t.preferredTime, t.importance, t.completedMinutes, t.prerequisiteIds])),
+    tasks: sha(tasks.map((t) => [t.id, t.status, t.estimatedDurationMinutes, t.dueDate, t.startDate, t.postponedUntil, t.isSplittable, t.minimumSessionMinutes, t.preferredTime, t.importance, t.completedMinutes, t.prerequisiteIds, t.appointmentId])),
   };
   return { userId, prefs, nowLocal, today, window: { from, to }, tasks, appointments, unavailable, hashParts: parts, hash: sha(parts) };
 }

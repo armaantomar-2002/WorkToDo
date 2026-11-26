@@ -27,6 +27,7 @@ const { createPostponeService } = require('../modules/planner/postpone.service')
 const { createCalendarService } = require('../modules/planner/calendar.service');
 const { createPlannerSummary } = require('../modules/planner/summary');
 const { postponeRouter, calendarRouter } = require('../modules/planner/planner.routes');
+const { autoDraft } = require('../modules/planner/autoDraft');
 const { createInsightsService } = require('../modules/insights/insights.service');
 const { insightsRouter } = require('../modules/insights/insights.routes');
 
@@ -42,12 +43,16 @@ function createDbRouter({ prisma, config, recommendationService, emailProvider =
   const scheduleService = createScheduleService({ prisma, runsService, now });
   const calendarService = createCalendarService({ prisma, now });
   const appointmentsService = createAppointmentsService({ prisma });
+  // A change to anything the schedule depends on regenerates a DRAFT for review (never auto-approves, never moves appointments).
+  const refresh = autoDraft({ scheduleService, onError: (e) => console.error('[auto-draft]', e && e.code ? e.code : e && e.message) });
+  router.use(['/tasks', '/appointments', '/unavailable-periods', '/focus-timers'], refresh);
+  router.use('/users', autoDraft({ scheduleService, match: (r) => /\/preferences/.test(r.originalUrl) }));
   router.use('/tasks', postponeRouter({ service: createPostponeService({ prisma, now }), authenticate }));
   router.use('/appointments', appointmentsRouter({ service: appointmentsService, authenticate }));
   router.use('/unavailable-periods', unavailableRouter({ service: appointmentsService, authenticate }));
   router.use('/schedules', scheduleRouter({ service: scheduleService, authenticate }));
   router.use('/calendar', calendarRouter({ service: calendarService, authenticate }));
-  router.use('/tasks', tasksRouter({ service: createTasksService({ prisma, now }), dependencies: createDependenciesService({ prisma }), authenticate }));
+  router.use('/tasks', tasksRouter({ service: createTasksService({ prisma, now, appointments: appointmentsService }), dependencies: createDependenciesService({ prisma }), authenticate }));
   router.use('/sessions', sessionsRouter({ service: createSessionsService({ prisma }), authenticate }));
   router.use('/focus-timers', timerRouter({ service: createTimerService({ prisma, now }), authenticate }));
   router.use('/recommendations', runsRouter({ service: runsService, feedback: createFeedbackService({ prisma }), authenticate }));
